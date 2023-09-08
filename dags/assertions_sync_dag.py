@@ -72,12 +72,9 @@ def taskflow():
 
     @task
     def call_api(jwt_token):
-        import pydevd_pycharm
-        pydevd_pycharm.settrace('localhost', port=5555, stdoutToServer=True, stderrToServer=True, suspend=False)
-
         headers = {'user-agent': 'token-refresh/0.1.1', 'Authorization': f'Bearer {jwt_token}'}
         try:
-            r = requests.get(url, headers=headers)
+            r = requests.get(ala_config.BIOCACHE_URL + '/sync', headers=headers)
             r.raise_for_status()
             print(f"API called successfully and here is status code: {r.status_code}, and text:{r.text}")
         except requests.exceptions.HTTPError as err:
