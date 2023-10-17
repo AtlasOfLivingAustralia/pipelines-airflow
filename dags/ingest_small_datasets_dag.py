@@ -3,10 +3,10 @@ from distutils.util import strtobool
 from airflow import DAG
 from airflow.operators.python import PythonOperator, ShortCircuitOperator
 
-from airflow.providers.amazon.aws.operators.emr_create_job_flow import EmrCreateJobFlowOperator
-from airflow.providers.amazon.aws.operators.emr_add_steps import EmrAddStepsOperator
-from airflow.providers.amazon.aws.sensors.emr_step import EmrStepSensor
-from airflow.providers.amazon.aws.sensors.emr_job_flow import EmrJobFlowSensor
+from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator
+from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator
+from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
+from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 
 from airflow.utils.dates import days_ago
 from datetime import timedelta

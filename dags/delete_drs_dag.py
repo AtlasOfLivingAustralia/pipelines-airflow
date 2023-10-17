@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.utils.dates import days_ago
 from datetime import timedelta
 from airflow.operators.python import PythonOperator
-from airflow.operators.bash_operator import BashOperator
+from airflow.operators.bash import BashOperator
 from ala import ala_config
 from ala.ala_helper import get_default_args
 from distutils.util import strtobool

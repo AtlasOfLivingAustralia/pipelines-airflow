@@ -1,9 +1,9 @@
-from airflow.providers.amazon.aws.operators.emr_create_job_flow import EmrCreateJobFlowOperator
-from airflow.providers.amazon.aws.operators.emr_add_steps import EmrAddStepsOperator
-from airflow.providers.amazon.aws.sensors.emr_step import EmrStepSensor
-from airflow.providers.amazon.aws.sensors.emr_job_flow import EmrJobFlowSensor
+from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator
+from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator
+from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
+from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 from ala import ala_config
-from dataclasses import dataclass, field, fields, asdict
+from dataclasses import dataclass, field
 
 
 def run_large_emr(dag, spark_steps, bootstrap_script, ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB, cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT):

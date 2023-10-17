@@ -6,16 +6,16 @@ import boto3
 from airflow import DAG
 from airflow.operators.email import EmailOperator
 from airflow.operators.python import PythonOperator
-from airflow.providers.amazon.aws.operators.emr_create_job_flow import EmrCreateJobFlowOperator
-from airflow.providers.amazon.aws.operators.emr_add_steps import EmrAddStepsOperator
-from airflow.providers.amazon.aws.sensors.emr_step import EmrStepSensor
-from airflow.providers.amazon.aws.sensors.emr_job_flow import EmrJobFlowSensor
+from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator
+from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator
+from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
+from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 from airflow.utils.trigger_rule import TriggerRule
 from airflow.utils.dates import days_ago
 
 from datetime import timedelta, timezone, datetime
 
-from ala import ala_config, cluster_setup, ala_helper
+from ala import ala_config, cluster_setup
 from ala.ala_helper import step_bash_cmd, get_default_args
 from ala.doi_service import S3Service
 from ala.doi_service import CollectoryService
