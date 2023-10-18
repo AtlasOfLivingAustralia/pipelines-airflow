@@ -172,7 +172,6 @@ class PipelinesSingleEMRConfig(PipelinesEMRConfig):
                 'Market': ala_config.MASTER_MARKET,
                 'InstanceRole': 'MASTER',
                 'InstanceType': self.instance_type,
-                'CustomAmiId': ala_config.PREINGESTION_AMI,
                 'InstanceCount': 1,
                 'EbsConfiguration': {
                     'EbsBlockDeviceConfigs': [
