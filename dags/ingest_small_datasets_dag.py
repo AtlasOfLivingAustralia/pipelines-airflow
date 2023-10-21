@@ -68,7 +68,7 @@ def get_post_image_steps(dataset_list, run_indexing=False):
         step_bash_cmd("k. Upload export", f" /tmp/upload-export.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}")
     ]
 
-    processing.append(post_processing)
+    processing = processing + post_processing
     return processing
 
 
