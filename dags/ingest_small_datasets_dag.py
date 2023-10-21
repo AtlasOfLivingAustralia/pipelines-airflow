@@ -1,3 +1,4 @@
+import logging
 from distutils.util import strtobool
 
 from airflow import DAG
@@ -10,7 +11,6 @@ from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 
 from airflow.utils.dates import days_ago
 from datetime import timedelta
-import logging
 
 from ala import cluster_setup, ala_config
 from ala.ala_helper import step_bash_cmd, get_default_args
@@ -21,7 +21,7 @@ DAG_ID = 'Ingest_small_datasets'
 def get_dwca_steps(dataset_list):
     return [
         step_bash_cmd("a. Download data", f" /tmp/download-datasets.sh {ala_config.S3_BUCKET_DWCA} {ala_config.S3_BUCKET_AVRO}  {dataset_list}"),
-        step_bash_cmd("b. DwCA to verbatim", f" la-pipelines dwca-avro {dataset_list}")
+        step_bash_cmd("b. DwCA to Verbatim", f" la-pipelines dwca-avro {dataset_list}")
     ]
 
 
@@ -50,15 +50,26 @@ def get_load_image_steps(dataset_list):
     ]
 
 
-def get_post_image_steps(dataset_list):
-    return [
+def get_post_image_steps(dataset_list, run_indexing=False):
+    processing = [
         step_bash_cmd("f. Image syncing", f" la-pipelines image-sync {dataset_list}"),
-        step_bash_cmd("g. Index", f" la-pipelines index {dataset_list}"),
+        step_bash_cmd("g. Index", f" la-pipelines index {dataset_list}")
+    ]
+
+    if run_indexing:
+        processing.append(
+            step_bash_cmd("h. SOLR", f" la-pipelines solr {dataset_list}")
+        )
+
+    post_processing = [
         step_bash_cmd("h. Export", f" la-pipelines dwca-export {dataset_list}"),
         step_bash_cmd("i. Add Frictionless", f" /tmp/frictionless.sh {dataset_list}"),
         step_bash_cmd("j. Upload data", f" /tmp/upload-datasets.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}"),
         step_bash_cmd("k. Upload export", f" /tmp/upload-export.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}")
     ]
+
+    processing.append(post_processing)
+    return processing
 
 
 with DAG(
@@ -72,6 +83,7 @@ with DAG(
         params={"datasetIds": "dr18391",
                 "load_images": "false",
                 "skip_dwca_to_verbatim": "false",
+                "run_indexing": "false",
                 "override_uuid_percentage_check": "false"
         }
 ) as dag:
@@ -86,11 +98,12 @@ with DAG(
     def construct_steps_with_options(**kwargs):
 
         load_images = strtobool(kwargs['dag_run'].conf['load_images'])
+        run_indexing = strtobool(kwargs['dag_run'].conf['run_indexing'])
         skip_dwca_to_verbatim = strtobool(kwargs['dag_run'].conf['skip_dwca_to_verbatim'])
-        dataset_list = kwargs['dag_run'].conf['datasetIds']
         override_uuid_percentage = strtobool(kwargs['dag_run'].conf['override_uuid_percentage_check'])
+        dataset_list = kwargs['dag_run'].conf['datasetIds']
 
-        logging.info(f"Args {dataset_list} load_images : {load_images}  skip_dwca_to_verbatim: {skip_dwca_to_verbatim}")
+        logging.info(f"Args {dataset_list} load_images: {load_images} skip_dwca_to_verbatim: {skip_dwca_to_verbatim}")
 
         steps = []
 
@@ -104,7 +117,7 @@ with DAG(
         if load_images:
             steps.extend(get_load_image_steps(dataset_list))
 
-        steps.extend(get_post_image_steps(dataset_list))
+        steps.extend(get_post_image_steps(dataset_list, run_indexing))
         return steps
 
 
