@@ -34,8 +34,12 @@ class CreateDagOperator:
         if s3_path:
             (bucket_name, path) = s3_path.replace("s3://", "").split("/", 1)
             s3_resource = boto3.resource('s3')
-            config_job = s3_resource.Object(bucket_name, path)
-            return json.load(config_job.get()['Body'])
+            try:
+                config_job = s3_resource.Object(bucket_name, path)
+                return json.load(config_job.get()['Body'])
+            except Exception as e:
+                print(f"Failed to load config file from {s3_path} with error {e}")
+                return {}
         else:
             return {}
 
