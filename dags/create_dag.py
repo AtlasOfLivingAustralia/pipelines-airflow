@@ -31,10 +31,13 @@ class CreateDagOperator:
         import json
         import boto3
 
-        (bucket_name, path) = s3_path.replace("s3://", "").split("/", 1)
-        s3_resource = boto3.resource('s3')
-        config_job = s3_resource.Object(bucket_name, path)
-        return json.load(config_job.get()['Body'])
+        if s3_path:
+            (bucket_name, path) = s3_path.replace("s3://", "").split("/", 1)
+            s3_resource = boto3.resource('s3')
+            config_job = s3_resource.Object(bucket_name, path)
+            return json.load(config_job.get()['Body'])
+        else:
+            return {}
 
     @staticmethod
     def create_dag(dag_id: str, trigger_dag_id: str, description: str, schedule: str, tags: [], params: {}):
