@@ -56,8 +56,14 @@ def get_post_image_steps(dataset_list, run_indexing=False):
         step_bash_cmd("g. Index", f" la-pipelines index {dataset_list} --cluster")
     ]
     if run_indexing:
+        solr_ws = f"{ala_config.SOLR_URL}/{ala_config.SOLR_COLLECTION}/update?commit=true"
+        datasets = [dataset_uid for dataset_uid in dataset_list.split() if dataset_uid]
+        for dataset_uid in datasets:
+            processing.append(
+                    step_bash_cmd( f"h-1-{dataset_uid}. SOLR - Delete existing {dataset_uid}",  f" curl {solr_ws} -H 'Content-Type: text/xml'  --data-binary '<delete><query>dataResourceUid:{dataset_uid}</query></delete>'", action_on_failure="CONTINUE")
+                )
         processing.append(
-            step_bash_cmd("h. SOLR", f" la-pipelines solr {dataset_list}")
+            step_bash_cmd("h-2. SOLR", f" la-pipelines solr {dataset_list} --cluster")
         )
 
     post_processing = [
