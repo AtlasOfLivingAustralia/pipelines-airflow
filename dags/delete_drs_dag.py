@@ -1,3 +1,4 @@
+import boto3
 from airflow import DAG
 from airflow.utils.dates import days_ago
 from datetime import timedelta
@@ -33,42 +34,31 @@ with DAG(
         :return: None
         """
 
-        def get_s3_del_cmd(path, extra_options=''):
-            del_cmd = f"aws s3 rm s3://{path}"
-            return f"{del_cmd} --recursive  --include '*.*' {extra_options}" if path.endswith("/") else del_cmd
-
-        def get_dr_cmds(dr, delete_avro_files, retain_dwca, retain_uuid):
-            cmds = []
-            if (not retain_dwca):
-                cmds.append(get_s3_del_cmd(path=f"{ala_config.S3_BUCKET_DWCA}/dwca-imports/{dr}/"))
-
-            if (delete_avro_files):
-                cmds.append(get_s3_del_cmd(path=f"{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets/index-record/{dr}/"))
-                cmds.append(get_s3_del_cmd(path=f"{ala_config.S3_BUCKET_AVRO}/dwca-exports/{dr}.zip"))
-                exclude_uuid = ''
-                if (retain_uuid):
-                    exclude_uuid = "--exclude '1/identifiers/*.*' --exclude 'identifiers-backup/*.*'"
-
-                cmds.append(get_s3_del_cmd(f"{ala_config.S3_BUCKET_AVRO}/pipelines-data/{dr}/",
-                                            extra_options=exclude_uuid))
-
-            return cmds
-
         datasets_param = kwargs['dag_run'].conf['datasetIds']
         delete_avro_files = strtobool(kwargs['dag_run'].conf['delete_avro_files'])
         retain_dwca = strtobool(kwargs['dag_run'].conf['retain_dwca'])
         retain_uuid = strtobool(kwargs['dag_run'].conf['retain_uuid'])
 
-        dataset_list = datasets_param.split()
-        for dr in dataset_list:
-            cmds = get_dr_cmds(dr=dr, delete_avro_files=delete_avro_files,
-                                    retain_dwca=retain_dwca, retain_uuid=retain_uuid)
-            for count, cmd in enumerate(cmds):
-                bash_operator = BashOperator(
-                    task_id=f"delete_{dr}_task{str(count)}",
-                    bash_command=cmd)
+        s3_client = boto3.client('s3')
 
-                bash_operator.execute(context=kwargs)
+        if not retain_dwca:
+            s3_client.delete_object(Bucket=ala_config.S3_BUCKET_DWCA, Key=f"dwca-imports/{datasets_param}/", Recursive=True)
+
+        if delete_avro_files:
+
+            logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets/index-record/{datasets_param}/")
+            s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=f"pipelines-all-datasets/index-record/{datasets_param}/", Recursive=True)
+
+            logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/dwca-exports/{datasets_param}.zip")
+            s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=f"dwca-exports/{datasets_param}.zip", Recursive=True)
+
+            exclude_uuid = ''
+            if retain_uuid:
+                exclude_uuid = "--exclude '1/identifiers/*.*' --exclude 'identifiers-backup/*.*'"
+
+            logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/pipelines-data/{datasets_param}/")
+            s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=f"pipelines-data/{datasets_param}/", Recursive=True, Exclude=exclude_uuid)
+
 
     delete_dataset_in_s3 = PythonOperator(
         task_id='delete_dataset',
