@@ -40,24 +40,31 @@ with DAG(
         retain_uuid = strtobool(kwargs['dag_run'].conf['retain_uuid'])
 
         s3_client = boto3.client('s3')
+        s3 = boto3.resource('s3')
 
         if not retain_dwca:
-            s3_client.delete_object(Bucket=ala_config.S3_BUCKET_DWCA, Key=f"dwca-imports/{datasets_param}/", Recursive=True)
+            bucket = s3.Bucket(ala_config.S3_BUCKET_DWCA)
+            bucket.objects.filter(Prefix=f"dwca-imports/{datasets_param}/").delete()
 
         if delete_avro_files:
 
+            avro_bucket = s3.Bucket(ala_config.S3_BUCKET_AVRO)
+
             logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets/index-record/{datasets_param}/")
-            s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=f"pipelines-all-datasets/index-record/{datasets_param}/", Recursive=True)
+            avro_bucket.objects.filter(Prefix=f"pipelines-all-datasets/index-record/{datasets_param}/").delete()
 
             logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/dwca-exports/{datasets_param}.zip")
-            s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=f"dwca-exports/{datasets_param}.zip", Recursive=True)
+            avro_bucket.objects.filter(Prefix=f"dwca-exports/{datasets_param}.zip").delete()
 
             exclude_uuid = ''
             if retain_uuid:
                 exclude_uuid = "--exclude '1/identifiers/*.*' --exclude 'identifiers-backup/*.*'"
 
             logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/pipelines-data/{datasets_param}/")
-            s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=f"pipelines-data/{datasets_param}/", Recursive=True, Exclude=exclude_uuid)
+            objs = avro_bucket.objects.filter(Prefix=f"pipelines-data/{datasets_param}/").delete()
+            for obj in objs:
+                if not obj.key.contains('identifiers'):
+                    s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=obj.key)
 
 
     delete_dataset_in_s3 = PythonOperator(
