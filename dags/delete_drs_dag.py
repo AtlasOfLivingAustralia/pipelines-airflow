@@ -63,7 +63,9 @@ with DAG(
             logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/pipelines-data/{datasets_param}/")
             objs = avro_bucket.objects.filter(Prefix=f"pipelines-data/{datasets_param}/").delete()
             for obj in objs:
-                if not obj.key.contains('identifiers'):
+                if retain_uuid and not obj.key.contains('identifiers'):
+                    s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=obj.key)
+                elif not retain_uuid:
                     s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=obj.key)
 
 
