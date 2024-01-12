@@ -108,6 +108,8 @@ def check_minimum_field_count(minimum_field_count: int, record_id: str, collecti
 
 
 def compare_records(record_id: str):
+    # These fields are  part of the assertions and are not expected to be in the new index till the assertion-sync job runs
+    assertion_fields = ['userAssertions', 'userVerified', 'hasUserAssertions', 'assertionUserId', 'lastAssertionDate']
     status = ResultStatus.PASS
     result = json_parse(f'{new_collection}/select',
                         {'q': 'id:' + record_id, 'rows': "10",
@@ -132,7 +134,7 @@ def compare_records(record_id: str):
     else:
         new_doc = new_docs[0]
         old_doc = old_docs[0]
-        missing_field_set = old_doc.keys() - new_doc.keys()
+        missing_field_set = old_doc.keys() - assertion_fields - new_doc.keys()
         if len(missing_field_set):
             print(
                 f"SEVERE- RECORD ID:{record_id} - There are {len(missing_field_set)} fields which are missing in the new records. Here is the list: {missing_field_set}")
