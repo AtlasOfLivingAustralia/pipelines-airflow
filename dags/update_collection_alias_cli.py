@@ -85,7 +85,7 @@ def get_total_count(collection: str, solr_cluster: str):
 
 def check_minimum_field_count(minimum_field_count: int, record_id: str, collection):
     status = ResultStatus.PASS
-    result = json_parse(f'{collection}/select', {'q': 'id:' +
+    result = json_parse(f'{collection}/select', {'q': f'id:"{record_id}"', 'rows': "10", 'wt': 'json', 'facet': 'false'},
                                                       record_id, 'rows': "10", 'wt': 'json', 'facet': 'false'},
                         solr_cluster=solr_base_new if solr_base_new else solr_base)
     if result is None:
