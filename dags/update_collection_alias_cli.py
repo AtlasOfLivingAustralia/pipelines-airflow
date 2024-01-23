@@ -86,7 +86,6 @@ def get_total_count(collection: str, solr_cluster: str):
 def check_minimum_field_count(minimum_field_count: int, record_id: str, collection):
     status = ResultStatus.PASS
     result = json_parse(f'{collection}/select', {'q': f'id:"{record_id}"', 'rows': "10", 'wt': 'json', 'facet': 'false'},
-                                                      record_id, 'rows': "10", 'wt': 'json', 'facet': 'false'},
                         solr_cluster=solr_base_new if solr_base_new else solr_base)
     if result is None:
         print(
@@ -263,8 +262,11 @@ def get_random_record_ids(collection: str, records_number: int, solr_cluster: st
             f"Getting id for record at offset {record_offset} in data resource {data_resource} record count for data resource={data_resources[data_resource]} drOffset={dr_offset}")
 
         result = json_parse(f'{collection}/select',
-                            {'q': 'dataResourceUid:' + data_resource, 'rows': "1", 'wt': 'json',
-                             'start': record_offset, 'fl': 'id',
+                            {'q': 'dataResourceUid:' + data_resource,
+                             'rows': "1",
+                             'wt': 'json',
+                             'start': record_offset,
+                             'fl': 'id',
                              'facet': 'false'}, solr_cluster)
 
         if result is None:
