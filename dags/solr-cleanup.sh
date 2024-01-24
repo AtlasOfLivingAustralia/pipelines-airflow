@@ -3,9 +3,13 @@
 # Set the directory to sort
 DIR="/data/solr"
 
-
+# Size threshold in bytes for indexes to be deleted, default 3MB
 SIZE_THRESHOLD=3000000
+
+# Alias pattern to match the collections starting with biocache-
 ALIAS_PATTERN="biocache"
+
+# Number of cores that can stay on the node, default 4
 NUM_CORES_THRESHOLD=4
 # Get number of nodes in the cluster
 NUM_NODES=$(curl --silent "http://localhost:8983/solr/admin/collections?action=CLUSTERSTATUS&wt=json" | jq '.cluster.live_nodes | length')
@@ -63,13 +67,13 @@ do
     # Get the size and directory name
     DIRNAME=$(echo $FILENAME | cut -d' ' -f2)
     echo "Deleting $DIRNAME"
-    echo "rm -rf $DIRNAME"
+    rm -rf $DIRNAME
 done
 echo
 echo
 # Restart solr
 echo "Restarting solr"
-echo "service solr restart"
+service solr restart
 
 # Waiting till solr is up
 echo "Waiting till solr is up"
