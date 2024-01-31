@@ -85,8 +85,7 @@ def get_total_count(collection: str, solr_cluster: str):
 
 def check_minimum_field_count(minimum_field_count: int, record_id: str, collection):
     status = ResultStatus.PASS
-    result = json_parse(f'{collection}/select', {'q': 'id:' +
-                                                      record_id, 'rows': "10", 'wt': 'json', 'facet': 'false'},
+    result = json_parse(f'{collection}/select', {'q': f'id:"{record_id}"', 'rows': "10", 'wt': 'json', 'facet': 'false'},
                         solr_cluster=solr_base_new if solr_base_new else solr_base)
     if result is None:
         print(
@@ -108,6 +107,8 @@ def check_minimum_field_count(minimum_field_count: int, record_id: str, collecti
 
 
 def compare_records(record_id: str):
+    # These fields are  part of the assertions and are not expected to be in the new index till the assertion-sync job runs
+    assertion_fields = ['userAssertions', 'userVerified', 'hasUserAssertions', 'assertionUserId', 'lastAssertionDate']
     status = ResultStatus.PASS
     result = json_parse(f'{new_collection}/select',
                         {'q': 'id:' + record_id, 'rows': "10",
@@ -132,7 +133,7 @@ def compare_records(record_id: str):
     else:
         new_doc = new_docs[0]
         old_doc = old_docs[0]
-        missing_field_set = old_doc.keys() - new_doc.keys()
+        missing_field_set = old_doc.keys() - assertion_fields - new_doc.keys()
         if len(missing_field_set):
             print(
                 f"SEVERE- RECORD ID:{record_id} - There are {len(missing_field_set)} fields which are missing in the new records. Here is the list: {missing_field_set}")
@@ -261,8 +262,11 @@ def get_random_record_ids(collection: str, records_number: int, solr_cluster: st
             f"Getting id for record at offset {record_offset} in data resource {data_resource} record count for data resource={data_resources[data_resource]} drOffset={dr_offset}")
 
         result = json_parse(f'{collection}/select',
-                            {'q': 'dataResourceUid:' + data_resource, 'rows': "1", 'wt': 'json',
-                             'start': record_offset, 'fl': 'id',
+                            {'q': 'dataResourceUid:' + data_resource,
+                             'rows': "1",
+                             'wt': 'json',
+                             'start': record_offset,
+                             'fl': 'id',
                              'facet': 'false'}, solr_cluster)
 
         if result is None:
