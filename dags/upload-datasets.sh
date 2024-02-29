@@ -3,6 +3,7 @@ set -x
 s3_bucket=$1
 
 for ((i = 2; i <= $#; i++ )); do
+(
   export datasetId=${!i}
 
   echo "Uploading pipeline-data $datasetId"
@@ -17,6 +18,7 @@ for ((i = 2; i <= $#; i++ )); do
   echo "Uploading indexed record $datasetId"
   sudo -u hadoop aws s3 rm s3://$s3_bucket/pipelines-all-datasets/index-record/$datasetId --recursive
   sudo -u hadoop aws s3 sync /data/pipelines-all-datasets/index-record/$datasetId s3://$s3_bucket/pipelines-all-datasets/index-record/$datasetId --delete
+) &
 done
-
+wait
 echo 'Completed upload of datasets'

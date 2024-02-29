@@ -3,7 +3,7 @@ set -x
 s3_bucket=$1
 
 for ((i = 2; i <= $#; i++ )); do
-
+(
   export datasetId=${!i}
 
   echo "Download existing AVRO $datasetId"
@@ -17,7 +17,7 @@ for ((i = 2; i <= $#; i++ )); do
     --dest=hdfs:///pipelines-data/$datasetId/1/verbatim
 
   echo "Download finished for $datasetId"
-
+) &
 done
-
+wait
 echo 'Completed download of datasets'

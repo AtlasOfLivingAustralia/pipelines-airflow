@@ -3,7 +3,7 @@ set -x
 s3_bucket=$1
 
 for ((i = 2; i <= $#; i++ )); do
-
+(
   export datasetId=${!i}
   echo 'Download ' $datasetId
 
@@ -23,7 +23,7 @@ for ((i = 2; i <= $#; i++ )); do
   else
       echo "Identifier path does not exist. This may be a new dr."
   fi
-
+) &
 done
-
+wait
 echo 'Completed download of datasets'

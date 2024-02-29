@@ -3,6 +3,7 @@ set -x
 s3_bucket=$1
 
 for ((i = 2; i <= $#; i++ )); do
+(
   export datasetId=${!i}
 
   sudo -u hadoop aws s3 rm -r s3://$s3_bucket/pipelines-all-datasets/index-record/$datasetId
@@ -32,7 +33,7 @@ for ((i = 2; i <= $#; i++ )); do
   sudo -u hadoop aws s3 rm s3://$s3_bucket/pipelines-data/$datasetId/1/identifiers --exclude "*" --include "*ala_uuid_backup*" --recursive
 
   echo $datasetId ' - Upload finished'
-
+) &
 done
-
+wait
 echo 'Completed upload of datasets'

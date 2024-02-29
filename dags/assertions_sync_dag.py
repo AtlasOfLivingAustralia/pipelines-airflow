@@ -72,6 +72,8 @@ def taskflow():
 
     @task
     def call_api(jwt_token):
+        import pydevd_pycharm
+        pydevd_pycharm.settrace('localhost', port=5555, stdoutToServer=True, stderrToServer=True, suspend=False)
         headers = {'user-agent': 'token-refresh/0.1.1', 'Authorization': f'Bearer {jwt_token}'}
         try:
             r = requests.get(ala_config.BIOCACHE_URL + '/sync', headers=headers)

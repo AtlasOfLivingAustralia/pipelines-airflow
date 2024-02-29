@@ -3,7 +3,7 @@ set -x
 s3_bucket=$1
 
 for ((i = 2; i <= $#; i++ )); do
-
+(
   export datasetId=${!i}
   echo 'Download ' $datasetId
 
@@ -35,7 +35,7 @@ for ((i = 2; i <= $#; i++ )); do
     --dest=hdfs:///pipelines-data/$datasetId/1
 
   echo $datasetId ' - Download finished'
-
+) &
 done
-
+wait
 echo 'Completed download of datasets'

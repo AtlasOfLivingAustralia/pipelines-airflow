@@ -3,6 +3,7 @@ set -x
 s3_bucket=$1
 
 for ((i = 2; i <= $#; i++ )); do
+(
   export datasetId=${!i}
 
   echo $datasetId ' - Removing existing index records'
@@ -14,7 +15,7 @@ for ((i = 2; i <= $#; i++ )); do
     --dest=s3://$s3_bucket/pipelines-annotations/$datasetId/1
 
   echo $datasetId ' - Upload finished'
-
+) &
 done
-
+wait
 echo 'Completed upload of datasets'

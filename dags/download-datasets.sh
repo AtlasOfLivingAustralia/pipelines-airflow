@@ -4,7 +4,7 @@ s3_bucket_dwca=$1
 s3_bucket_avro=$2
 
 for ((i = 3; i <= $#; i++ )); do
-
+(
   export datasetId=${!i}
   echo 'Download ' $datasetId
 
@@ -28,7 +28,7 @@ for ((i = 3; i <= $#; i++ )); do
   else
       echo "Identifier path does not exist. This may be a new dr."
   fi
-
+) &
 done
-
+wait
 echo 'Completed download of datasets'

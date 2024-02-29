@@ -3,6 +3,7 @@ set -x
 s3_bucket=$1
 
 for ((i = 2; i <= $#; i++ )); do
+(
   export datasetId=${!i}
   echo 'Download ' $datasetId
 
@@ -11,7 +12,7 @@ for ((i = 2; i <= $#; i++ )); do
       --src=s3://$s3_bucket/pipelines-annotations/$datasetId/ \
       --dest=hdfs:///pipelines-annotations/$datasetId/ \
       --srcPattern=".*.zip"
-
+) &
 done
-
+wait
 echo 'Completed download of annotation datasets'
