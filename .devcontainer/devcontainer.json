@@ -15,11 +15,16 @@
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [8765],
+	"mounts": [
+		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/airflow/.cache,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/airflow/.command-history,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder},target=/opt/airflow,type=bind,consistency=cached"
+		],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"containerEnv": {
 		"PROMPT_COMMAND": "history -a",
-		"HISTFILE": "/home/vscode/.command-history/.bash_hist"
+		"HISTFILE": "/home/airflow/.command-history/.bash_hist"
 	},
 
 	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases &&  pip3 install --user -r ./dags/requirements.txt",
@@ -45,7 +50,7 @@
 				"python.analysis.disableSemanticOnNoPython": false,
 				"python.analysis.enableSyncServer": true,
 				"python.analysis.userFileIndexingLimit": -1,
-                "python.defaultInterpreterPath": "/home/airflow/.local/lib/python3.11/site-packages/",
+                "python.defaultInterpreterPath": "/home/airflow/.local/lib/python3.11/site-packages/airflow/bin/python",
 				"python.formatting.provider": "none",
 				"python.languageServer": "Pylance",
 				"python.linting.enabled": false,

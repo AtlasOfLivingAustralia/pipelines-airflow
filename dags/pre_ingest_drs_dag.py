@@ -2,16 +2,16 @@
 import logging as log
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.operators.python import BranchPythonOperator
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.trigger_rule import TriggerRule
-from airflow.providers.amazon.aws.operators.emr_add_steps import EmrAddStepsOperator
-from airflow.providers.amazon.aws.operators.emr_create_job_flow import EmrCreateJobFlowOperator
-from airflow.providers.amazon.aws.sensors.emr_job_flow import EmrJobFlowSensor
-from airflow.providers.amazon.aws.sensors.emr_step import EmrStepSensor
+from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator
+from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator
+from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
+from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
 from datetime import datetime, timedelta
 from airflow.utils.dates import days_ago
 from ala import ala_config, cluster_setup
@@ -189,12 +189,12 @@ with DAG(
         trigger_rule=TriggerRule.ALL_SUCCESS
     )
 
-    skip_ingest = DummyOperator(
+    skip_ingest = EmptyOperator(
         task_id='skip_ingest',
         trigger_rule=TriggerRule.ALL_SUCCESS
     )
 
-    ingest_batch = DummyOperator(
+    ingest_batch = EmptyOperator(
         task_id='ingest_batch',
         trigger_rule=TriggerRule.ALL_SUCCESS
     )
@@ -264,7 +264,7 @@ with DAG(
                       + str(batch_no) + "') }}", 'load_images': f"{load_images}", "override_uuid_percentage_check": override_uuid_percentage_check,
                       "skip_collectory_download": "true"})
 
-        check_ingest_batches = DummyOperator(
+        check_ingest_batches = EmptyOperator(
             task_id='check_ingest_batches',
             trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
         )

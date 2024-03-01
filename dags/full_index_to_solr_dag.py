@@ -6,13 +6,13 @@
 from airflow import DAG
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator
 from airflow.utils.task_group import TaskGroup
-from airflow.providers.amazon.aws.operators.emr_create_job_flow import EmrCreateJobFlowOperator
-from airflow.providers.amazon.aws.operators.emr_add_steps import EmrAddStepsOperator
-from airflow.providers.amazon.aws.sensors.emr_step import EmrStepSensor
-from airflow.providers.amazon.aws.sensors.emr_job_flow import EmrJobFlowSensor
+from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator
+from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator
+from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
+from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 from airflow.utils.dates import days_ago
 from airflow.utils.trigger_rule import TriggerRule
 
@@ -159,17 +159,17 @@ with DAG(
         trigger_rule=TriggerRule.ALL_SUCCESS
     )
 
-    image_sync = DummyOperator(
+    image_sync = EmptyOperator(
         task_id='image_sync',
         trigger_rule=TriggerRule.NONE_FAILED
     )
 
-    image_sync_batch = DummyOperator(
+    image_sync_batch = EmptyOperator(
         task_id='image_sync_batch',
         trigger_rule=TriggerRule.ALL_SUCCESS
     )
 
-    full_index_to_solr = DummyOperator(
+    full_index_to_solr = EmptyOperator(
         task_id='full_index_to_solr',
         trigger_rule=TriggerRule.NONE_FAILED
     )
@@ -213,7 +213,7 @@ with DAG(
                                   + str(batch_no) + "') }}"})
 
 
-        check_image_sync_batches = DummyOperator(
+        check_image_sync_batches = EmptyOperator(
             task_id='check_image_sync_batches',
             trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
         )

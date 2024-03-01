@@ -7,3 +7,5 @@
 *.iml
 
 .devcontainer/.env
+
+nohup.out
