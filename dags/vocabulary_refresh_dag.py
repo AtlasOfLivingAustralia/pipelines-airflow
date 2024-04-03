@@ -27,6 +27,7 @@ DAG_ID = 'Vocabulary_refresh'
 
 @dag(
     dag_id=DAG_ID,
+    catchup=False,
     default_args=ala_helper.get_default_args(),
     description="Loads LifeStage.json file from GBIF to S3 Bucket",
     dagrun_timeout=timedelta(hours=2),

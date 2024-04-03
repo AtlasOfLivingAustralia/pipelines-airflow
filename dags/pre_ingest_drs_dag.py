@@ -76,6 +76,7 @@ def setup_cluster(datasetIds, inst_type, extra_args, run_id_path, **kwargs):
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         description="Running preingestion job for multiple drs",
         default_args=get_default_args(),
         dagrun_timeout=timedelta(hours=8),

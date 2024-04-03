@@ -15,6 +15,7 @@ SPARK_STEPS = [
 
 with DAG(
     dag_id=DAG_ID,
+    catchup=False,
     default_args=get_default_args(),
     description="Run image load pipeline for this dataset",
     dagrun_timeout=timedelta(hours=2),

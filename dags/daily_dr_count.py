@@ -16,6 +16,7 @@ DAG_ID = 'daily_dr_count'
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=ala_helper.get_default_args(),
         description="Run the daily dr count",
         dagrun_timeout=timedelta(hours=2),

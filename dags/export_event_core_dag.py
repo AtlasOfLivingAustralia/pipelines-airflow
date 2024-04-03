@@ -44,6 +44,7 @@ def get_spark_steps(dataset_list,  request_id, search_query):
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=get_default_args(),
         description="Debug Export Event Core DwCA",
         dagrun_timeout=timedelta(hours=2),

@@ -12,6 +12,7 @@ DAG_ID = 'Delete_dataset_dag'
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=get_default_args(),
         description="Delete datasets from pipelines",
         dagrun_timeout=timedelta(hours=8),

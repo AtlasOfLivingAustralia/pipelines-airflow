@@ -15,6 +15,7 @@ SPARK_STEPS = [
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=ala_helper.get_default_args(),
         description="Process publication supplied datasets",
         dagrun_timeout=timedelta(hours=6),

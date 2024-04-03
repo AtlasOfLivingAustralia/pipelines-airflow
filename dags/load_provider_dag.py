@@ -22,6 +22,7 @@ DAG_ID = 'Load_provider'
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=ala.ala_helper.get_default_args(),
         description="Loads DwCAs for data provider from the collectory into S3 and run all pipelines for a single dataset",
         dagrun_timeout=timedelta(hours=2),

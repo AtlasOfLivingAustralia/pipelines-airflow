@@ -13,6 +13,7 @@ SPARK_STEPS = [
 
 with DAG(
     dag_id=DAG_ID,
+    catchup=False,
     description="Run clustering for all datasets",
     default_args=ala_helper.get_default_args(),
     dagrun_timeout=timedelta(hours=1),

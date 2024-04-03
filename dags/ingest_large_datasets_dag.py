@@ -64,6 +64,7 @@ def get_post_image_steps(dataset_list):
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=get_default_args(),
         description="Ingest DwCA from S3 and run all pipelines (not including SOLR indexing)",
         dagrun_timeout=timedelta(hours=12),

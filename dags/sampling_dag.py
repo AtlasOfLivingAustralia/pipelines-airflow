@@ -15,6 +15,7 @@ SPARK_STEPS = [
 
 with DAG(
     dag_id=DAG_ID,
+    catchup=False,
     description="Run sampling for all datasets",
     default_args=get_default_args(),
     dagrun_timeout=timedelta(hours=5),

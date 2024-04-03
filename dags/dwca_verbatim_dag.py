@@ -16,6 +16,7 @@ SPARK_STEPS = [
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=get_default_args(),
         description="DWCA to Verbatim AVRO supplied datasets",
         dagrun_timeout=timedelta(hours=8),

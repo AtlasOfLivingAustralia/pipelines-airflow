@@ -24,6 +24,7 @@ DAG_ID = 'Load_dataset'
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=get_default_args(),
         description="Loads DwCA from the collectory into S3 and run all pipelines for a single dataset",
         dagrun_timeout=timedelta(hours=8),

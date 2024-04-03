@@ -60,6 +60,7 @@ SPARK_STEPS = [
 
 with DAG(
     dag_id=DAG_ID,
+    catchup=False,
     description="SOLR indexing for all datasets. This will recreate the full index and swap the SOLR alias on successful completion",
     default_args=get_default_args(),
     dagrun_timeout=timedelta(hours=4),

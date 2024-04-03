@@ -61,6 +61,7 @@ def get_spark_steps(solr_collection_name, include_sampling, include_jack_knife, 
 
 with DAG(
     dag_id=DAG_ID,
+    catchup=False,
     description="SOLR indexing for all datasets. This will recreate the full index and swap the SOLR alias on successful completion",
     default_args=get_default_args(),
     dagrun_timeout=timedelta(hours=12),

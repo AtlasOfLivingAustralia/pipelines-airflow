@@ -17,6 +17,7 @@ SPARK_STEPS = [
 
 with DAG(
     dag_id=DAG_ID,
+    catchup=False,
     description="SOLR indexing for single dataset. This will delete the dataset from the index and reindex",
     default_args=get_default_args(),
     dagrun_timeout=timedelta(hours=1),

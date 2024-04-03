@@ -14,6 +14,7 @@ DAG_ID = 'Update_gbif_metadata'
 
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=ala_helper.get_default_args(),
         description="Update GBIF metadata",
         dagrun_timeout=timedelta(hours=1),

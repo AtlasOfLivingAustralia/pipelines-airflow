@@ -19,6 +19,7 @@ DAG_ID = 'Ingest_all_datasets'
 # list all archives under /dwca-export with file sizes
 with DAG(
         dag_id=DAG_ID,
+        catchup=False,
         default_args=ala_helper.get_default_args(),
         description="Ingest all DwCAs available on S3 and run all pipelines (not including SOLR indexing)",
         dagrun_timeout=timedelta(hours=24),
