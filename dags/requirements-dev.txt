@@ -1,0 +1,2 @@
+debugpy
+-r requirements.txt
