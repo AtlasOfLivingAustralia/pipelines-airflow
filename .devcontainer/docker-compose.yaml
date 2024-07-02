@@ -46,6 +46,7 @@ x-airflow-common:
   # and uncomment the "build" line below, Then run `docker compose build` to build the images.
   image: ${AIRFLOW_IMAGE_NAME}
   platform: linux/arm64
+
   # build: .
   environment:
     &airflow-common-env
@@ -58,12 +59,14 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKEND: 'airflow.api.auth.backend.basic_auth'
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+    DEBUGGER: 1
   volumes:
     - ../dags:/opt/airflow/dags
     - ../logs:/opt/airflow/logs
     - ../plugins:/opt/airflow/plugins
     - ~/.ssh:/home/airflow/.ssh
     - ~/.aws:/home/airflow/.aws
+    - ../airflow_docker_debug_wrapper.py:/home/airflow/.local/bin/airflow
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -116,7 +119,7 @@ services:
 
   airflow-scheduler:
     <<: *airflow-common
-    command: scheduler
+    command:  ["bash", "-c", "pip3 install --no-cache-dir -r /opt/airflow/dags/requirements-dev.txt && scheduler"]
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
       interval: 10s
@@ -130,7 +133,7 @@ services:
 
   airflow-worker:
     <<: *airflow-common
-    command: celery worker
+    command: celery worker --concurrency=1
     healthcheck:
       test:
         - "CMD-SHELL"
@@ -143,12 +146,14 @@ services:
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
+    ports:
+      - 9035:9034
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-
+    
   airflow-triggerer:
     <<: *airflow-common
     command: triggerer

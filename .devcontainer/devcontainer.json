@@ -16,18 +16,18 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [8765],
 	"mounts": [
-		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/airflow/.cache,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/airflow/.command-history,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/${remoteUser}/.cache,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/${remoteUser}/.command-history,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder},target=/opt/airflow,type=bind,consistency=cached"
-		],
+	],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"containerEnv": {
 		"PROMPT_COMMAND": "history -a",
-		"HISTFILE": "/home/airflow/.command-history/.bash_hist"
+		"HISTFILE": "/home/${remoteUser}/.command-history/.bash_hist"
 	},
 
-	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases &&  pip3 install --user -r ./dags/requirements.txt",
+	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && sleep 5",
 
 	// Configure tool-specific properties.
 	"customizations": {
@@ -50,7 +50,7 @@
 				"python.analysis.disableSemanticOnNoPython": false,
 				"python.analysis.enableSyncServer": true,
 				"python.analysis.userFileIndexingLimit": -1,
-                "python.defaultInterpreterPath": "/home/airflow/.local/lib/python3.11/site-packages/airflow/bin/python",
+                "python.defaultInterpreterPath": "/home/${remoteUser}/.local/lib/python3.11/site-packages/airflow/bin/python",
 				"python.formatting.provider": "none",
 				"python.languageServer": "Pylance",
 				"python.linting.enabled": false,
@@ -68,7 +68,15 @@
 				  "editor.formatOnSaveMode": "file",
 				  "editor.codeActionsOnSave": {
 					"source.organizeImports": true
-				  }
+				  },
+				  "terminal.integrated.shell.linux": "bash",
+				  "terminal.integrated.profiles.linux": {
+					"bash (container default)": {
+					  "path": "/usr/bin/bash",
+					  "overrideName": true
+					}
+				  },
+				  "terminal.integrated.defaultProfile.linux": "bash (container default)"
 				}
 			  },      
 			"extensions": [
@@ -76,7 +84,8 @@
 				"ms-python.vscode-pylance",
 				"GitHub.copilot",
 				"mechatroner.rainbow-csv",
-				"ms-toolsai.jupyter"
+				"ms-toolsai.jupyter",
+				"ms-python.debugpy"
 			]
 		}
 	},
