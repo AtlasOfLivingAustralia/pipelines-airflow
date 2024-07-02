@@ -1,12 +1,12 @@
 import json
-from datetime import timedelta
-import jwt
-import time
-import requests
-from airflow.decorators import task, dag
-from airflow.utils.dates import days_ago
 import logging
+import time
+from datetime import timedelta
 
+import jwt
+import requests
+from airflow.decorators import dag, task
+from airflow.utils.dates import days_ago
 from ala import ala_config, ala_helper
 
 DAG_ID = 'Assertions-Sync'
@@ -67,13 +67,14 @@ class Authenticator:
 def taskflow():
     @task
     def authenticate():
+        # import debugpy
+        # debugpy.wait_for_client()
+
         auth = Authenticator(ala_config.AUTH_TOKEN_URL, ala_config.AUTH_CLIENT_ID, ala_config.AUTH_CLIENT_SECRET)
         return auth.get_token()
 
     @task
     def call_api(jwt_token):
-        import pydevd_pycharm
-        pydevd_pycharm.settrace('localhost', port=5555, stdoutToServer=True, stderrToServer=True, suspend=False)
         headers = {'user-agent': 'token-refresh/0.1.1', 'Authorization': f'Bearer {jwt_token}'}
         try:
             r = requests.get(ala_config.BIOCACHE_URL + '/sync', headers=headers)
