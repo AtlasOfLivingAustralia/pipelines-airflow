@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# ################
+#
+# This script is deployed on the Solr nodes and is responsible for cleaning up the Solr indexes.
+# The script is scheduled via cron torun once every month with enough time gap between the nodes.
+#
+# ################
+
+set -ex
+
 # Set the directory to sort
 DIR="/data/solr"
 
@@ -73,7 +82,8 @@ echo
 echo
 # Restart solr
 echo "Restarting solr"
-service solr restart
+service solr stop
+service solr start
 
 # Waiting till solr is up
 echo "Waiting till solr is up"
