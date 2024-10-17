@@ -1,0 +1,104 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/python
+{
+	"name": "Airflow 2.3.4",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+    "dockerComposeFile": [
+		"./docker-compose.yaml"
+	],
+    "service": "airflow-scheduler",
+    "workspaceFolder": "/opt/airflow",
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+
+	// add a port forwarding for solr to hosts localhost
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [8765],
+	"mounts": [
+		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/${remoteUser}/.cache,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/${remoteUser}/.command-history,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.devcontainer,target=/opt/airflow/.devcontainer,type=bind,consistency=cached",
+		"source=~/.aws,target=/opt/airflow/.aws,type=bind,consistency=cached",
+		"source=~/.ssh,target=/opt/airflow/.ssh,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached"
+		],
+
+	// Use 'postCreateCommand' to run commands after the container is created.
+	"containerEnv": {
+		"PROMPT_COMMAND": "history -a",
+		"HISTFILE": "/home/${remoteUser}/.command-history/.bash_hist"
+	},
+
+	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ln -s /opt/airflow/.aws /home/airflow/.aws",
+
+	// Configure tool-specific properties.
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"files.exclude": {
+				  "**/__pycache__": true,
+				  "**/.pytest_cache": true
+				},
+				"files.autoSave": "onFocusChange",
+				"git.autorefresh": true,
+				"extensions.ignoreRecommendations": true,        
+				"isort.args": [
+				  "--profile",
+				  "black"
+				],        
+				"python.analysis.diagnosticMode": "workspace",
+				"python.analysis.typeCheckingMode": "off",
+				"python.analysis.logLevel": "Trace",
+				"python.analysis.disableSemanticOnNoPython": false,
+				"python.analysis.enableSyncServer": true,
+				"python.analysis.userFileIndexingLimit": -1,
+                "python.defaultInterpreterPath": "/home/${remoteUser}/.local/lib/python3.11/site-packages/airflow/bin/python",
+				"python.formatting.provider": "none",
+				"python.languageServer": "Pylance",
+				"python.linting.enabled": false,
+				"python.linting.lintOnSave": false,
+				"python.testing.autoTestDiscoverOnSaveEnabled": false,
+				"python.testing.pytestArgs": [
+				  "tests"
+				],
+				"python.testing.pytestEnabled": true,
+				"python.testing.unittestEnabled": false,
+				"[python]": {
+				  "editor.defaultFormatter": "ms-python.black-formatter",
+				  "editor.formatOnSave": true,
+				  "editor.formatOnPaste": false,
+				  "editor.formatOnSaveMode": "file",
+				  "editor.codeActionsOnSave": {
+					"source.organizeImports": true
+				  },
+				  "terminal.integrated.shell.linux": "bash",
+				  "terminal.integrated.profiles.linux": {
+					"bash (container default)": {
+					  "path": "/usr/bin/bash",
+					  "overrideName": true
+					}
+				  },
+				  "terminal.integrated.defaultProfile.linux": "bash (container default)"
+				}
+			  },      
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"GitHub.copilot",
+				"mechatroner.rainbow-csv",
+				"ms-toolsai.jupyter",
+				"ms-python.debugpy",
+				"amazonwebservices.aws-toolkit-vscode"
+			]
+		}
+	},
+	
+	// "runArgs": [
+	// 	"--network=host",
+	// ],
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	"runArgs": ["--env-file","./.env"],
+	"remoteUser": "airflow"
+}
