@@ -22,7 +22,7 @@ class Authenticator:
         logging.info(f'Token read successfully.')
 
     def get_token(self):
-        decoded = jwt.decode(self.token_obj["access_token"],
+        decoded = jwt.decode(self.token_obj["access_token"], algorithms='RS256',
                              options={"verify_signature": False}, verify=False)
         # re-generate token when expired.
         if decoded["exp"] < int(time.time()):
@@ -35,8 +35,7 @@ class Authenticator:
     def regenerate_token(self):
         payload = {'refresh_token': self.token_obj["refresh_token"],
                    'grant_type': 'refresh_token',
-                   'scope': self.token_obj["scope"],
-                   'client_id': self.client_id}
+                   'scope': self.token_obj["scope"]}
         # refreshing token
         logging.info(f'Sending request to {self.token_url} to read new tokens.')
         r = requests.post(self.token_url, data=payload,
