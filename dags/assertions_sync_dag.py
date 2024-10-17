@@ -26,7 +26,7 @@ DAG_ID = 'Assertions-Sync'
      )
 def taskflow():
     @task
-    def authenticate():
+    def authenticate():   
         auth = ja.Authenticator(ala_config.AUTH_TOKEN_URL, ala_config.AUTH_CLIENT_ID, ala_config.AUTH_CLIENT_SECRET)
         return auth.get_token()
 
@@ -34,7 +34,8 @@ def taskflow():
     def call_api(jwt_token):
         headers = {'user-agent': 'token-refresh/0.1.1', 'Authorization': f'Bearer {jwt_token}'}
         try:
-            r = requests.get(urljoin(ala_config.BIOCACHE_URL, '/sync'), headers=headers)
+            sync_url = urljoin(ala_config.BIOCACHE_URL.rstrip('/') + '/', 'sync')
+            r = requests.get(sync_url, headers=headers)
             r.raise_for_status()
             print(f"API called successfully and here is status code: {r.status_code}, and text:{r.text}")
         except requests.exceptions.HTTPError as err:
