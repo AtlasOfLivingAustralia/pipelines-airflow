@@ -19,8 +19,7 @@
 		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/${remoteUser}/.cache,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/${remoteUser}/.command-history,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.devcontainer,target=/opt/airflow/.devcontainer,type=bind,consistency=cached",
-		"source=~/.aws,target=/opt/airflow/.aws,type=bind,consistency=cached",
-		"source=~/.ssh,target=/opt/airflow/.ssh,type=bind,consistency=cached",
+		"source=~/.ssh,target=/home/airflow/.ssh,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached"
 		],
 
@@ -30,7 +29,7 @@
 		"HISTFILE": "/home/${remoteUser}/.command-history/.bash_hist"
 	},
 
-	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ln -s /opt/airflow/.aws /home/airflow/.aws",
+	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-1.ala",
 
 	// Configure tool-specific properties.
 	"customizations": {

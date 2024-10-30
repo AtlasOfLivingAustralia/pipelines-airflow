@@ -56,6 +56,8 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    AIRFLOW__CORE__PARALLELISM: 10
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: 10
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
     DEBUGGER: 1
   volumes:
@@ -63,6 +65,7 @@ x-airflow-common: &airflow-common
     - ../logs:/opt/airflow/logs
     - ../config:/opt/airflow/config
     - ../plugins:/opt/airflow/plugins
+    - ~/.aws:/home/airflow/.aws
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
     redis:
@@ -144,7 +147,7 @@ services:
     command: 
       [
         "bash", 
-        "-c", " pip install -U -r /opt/airflow/dags/requirements-dev-worker.txt && airflow celery worker --concurrency=1"
+        "-c", " pip install -U -r /opt/airflow/dags/requirements-dev-worker.txt && airflow celery worker --concurrency=10"
       ]
     healthcheck:
       test:
@@ -159,6 +162,8 @@ services:
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
     restart: always
+    deploy:
+      replicas: 1
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -298,10 +303,3 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-# volumes:
-#   postgres-db-volume:
-#     driver: local
-#     driver_opts:
-#       type: none
-#       device: ./.pg/data
-#       o: bind
