@@ -20,7 +20,7 @@ from distutils.util import strtobool
 from datetime import date, timedelta, datetime
 import logging
 from ala import ala_config, ala_helper, cluster_setup
-from ala.ala_helper import step_bash_cmd, s3_cp, emr_python_step, get_default_args
+from ala.ala_helper import step_bash_cmd, s3_cp, emr_python_step, get_default_args, call_url
 
 DAG_ID = 'Full_index_to_solr'
 
@@ -300,12 +300,26 @@ with DAG(
     assertion_sync = TriggerDagRunOperator(
         task_id='assertion_sync',
         trigger_dag_id="Assertions-Sync",
-        trigger_rule=TriggerRule.ALL_DONE,
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
         wait_for_completion=True,
         conf={}
     )
 
+    update_gbif_task = TriggerDagRunOperator(
+        task_id='update_gbif_task',
+        trigger_dag_id="Update_gbif_metadata",
+        wait_for_completion=True,
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS, )
+
+    clear_dashboard_cache = PythonOperator(
+        task_id='clear_dashboard_cache',
+        python_callable=ala_helper.call_url,
+        op_kwargs={'url': ala_config.DASHBOARD_CACHE_CLEAR_URL},
+    )
     check_image_sync_flag >> [image_sync, full_index_to_solr]
     image_sync >> get_drs_for_image_sync_index >> check_image_sync_count >> [full_index_to_solr, image_sync_batch]
     image_sync_batch >> image_sync_batch_task_grp >> full_index_to_solr
-    full_index_to_solr >> full_index_to_solr_task_grp >> assertion_sync
+    full_index_to_solr >> full_index_to_solr_task_grp
+    full_index_to_solr_task_grp >> assertion_sync >> clear_dashboard_cache
+    full_index_to_solr_task_grp >> update_gbif_task
+

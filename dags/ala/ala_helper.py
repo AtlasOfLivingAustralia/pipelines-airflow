@@ -15,6 +15,17 @@ from ala import ala_config
 log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
 
+def call_url(url, headers=None) -> str:
+    try:
+        print(f"Calling URL: {url}")
+        with requests.get(url, headers=headers) as response:
+            response.raise_for_status()
+            print(f"Response: {response}")
+            return response.text
+    except requests.exceptions.HTTPError as err:
+        logging.error(f"Error encountered during request {url}", err)
+        raise IOError(err)
+
 
 def json_parse(base_url: str, url_path: str, params={}, headers=None):
     """
