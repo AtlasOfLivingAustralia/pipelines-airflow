@@ -4,8 +4,8 @@ from airflow.models import Variable
 
 ALA_API_KEY = Variable.get("ala_api_key")
 DOI_API_KEY = Variable.get("doi_api_key")
-
-AUTH_TOKEN = Variable.get('auth_token')
+ALA_API_URL = Variable.get("ala_api_url")
+AUTH_SCOPE = Variable.get('auth_scope')
 AUTH_CLIENT_ID = Variable.get('auth_client_id')
 AUTH_CLIENT_SECRET = Variable.get('auth_client_secret')
 AUTH_TOKEN_URL = Variable.get('ala_oidc_url')
