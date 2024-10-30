@@ -47,7 +47,10 @@ with DAG(
 
 
     def list_datasets_in_bucket(**kwargs):
-        return ala_helper.list_drs_dwca_in_bucket(**kwargs)
+        if strtobool(kwargs['dag_run'].conf['skip_dwca_to_verbatim']):
+            return ala_helper.list_drs_verbatim_avro_in_bucket(**kwargs)
+        else:
+            return ala_helper.list_drs_dwca_in_bucket(**kwargs)
 
 
     def classify_datasets(category, batch_count, criteria, ti):
@@ -106,7 +109,7 @@ with DAG(
     list_datasets_in_bucket = PythonOperator(
         task_id='list_datasets_in_bucket',
         provide_context=True,
-        op_kwargs={'bucket': ala_config.S3_BUCKET_DWCA},
+        op_kwargs={'bucket': ala_config.S3_BUCKET_DWCA },
         python_callable=list_datasets_in_bucket)
 
     process_small = PythonOperator(

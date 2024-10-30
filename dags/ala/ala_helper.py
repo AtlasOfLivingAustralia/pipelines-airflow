@@ -336,6 +336,12 @@ def list_drs_index_avro_in_bucket(**kwargs):
                                   time_range=(None, None) if "time_range" not in kwargs else kwargs[
                                       "time_range"])
 
+def list_drs_verbatim_avro_in_bucket(**kwargs):
+
+    return list_objects_in_bucket(kwargs['bucket'], 'pipelines-data/',
+                                  r'^.*/dr[0-9]+/1/verbatim/verbatim+[\-0-9of]*\.avro$', sub_dr_folder='',
+                                  time_range=(None, None) if "time_range" not in kwargs else kwargs[
+                                      "time_range"])
 
 def list_drs_ingested_since(**kwargs):
     return list_objects_in_bucket(kwargs['bucket'], 'pipelines-data/',
