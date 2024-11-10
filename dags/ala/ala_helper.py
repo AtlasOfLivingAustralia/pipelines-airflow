@@ -5,6 +5,7 @@ import os
 import re
 from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
+from requests.compat import urljoin
 
 import boto3
 import requests
@@ -13,6 +14,36 @@ from ala import ala_config
 
 log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
+
+def call_url(url, headers=None) -> str:
+    try:
+        print(f"Calling URL: {url}")
+        with requests.get(url, headers=headers) as response:
+            response.raise_for_status()
+            print(f"Response: {response}")
+            return response.text
+    except requests.exceptions.HTTPError as err:
+        logging.error(f"Error encountered during request {url}", err)
+        raise IOError(err)
+
+
+def json_parse(base_url: str, url_path: str, params={}, headers=None):
+    """
+    Calls the specified URL and returns the JSON response.
+    :param base_url: like https://collections.ala.org.au/ws
+    :param url_path: like /dataResource/dr000
+    :param params: is a dictionary of parameters to be passed to the API
+    :return: is the json response from the URL
+    """
+    try:
+        full_url = urljoin(base_url, url_path)
+        with requests.get(full_url, params, headers=headers) as response:
+            response.raise_for_status()
+            json_result = json.loads(response.content)
+            return json_result
+    except requests.exceptions.HTTPError as err:
+        logging.error(f"Error encountered during request {full_url} with params {params}", err)
+        raise IOError(err)
 
 
 def get_dr_count(dr: str):
@@ -25,16 +56,11 @@ def get_dr_count(dr: str):
     :rtype: int
     :raises requests.exceptions.HTTPError: If an HTTP error occurs while making the request to Biocache.
     """
-    count: int = 0
     try:
-        with requests.get(
-                f'{ala_config.BIOCACHE_WS}/occurrences/search?q=data_resource_uid:{dr}&fq=&pageSize=0') as response:
-            response.raise_for_status()
-            biocache_json = json.loads(response.content)
-            count = biocache_json['totalRecords']
+        biocache_json = json_parse(ala_config.BIOCACHE_WS, '/occurrences/search', {'q': f'data_resource_uid:{dr}', 'pageSize': '0'})
+        return biocache_json['totalRecords']
     except requests.exceptions.HTTPError as err:
-        count = 0
-    return count
+        return 0
 
 
 def search_biocache(query: str):
@@ -52,11 +78,7 @@ def search_biocache(query: str):
 
     See https://biocache.ala.org.au/ws for more information on the Biocache web service.
     """
-    with requests.get(
-            f'{ala_config.BIOCACHE_WS}/occurrences/search?{query}') as response:
-        response.raise_for_status()
-        biocache_json = json.loads(response.content)
-        return biocache_json
+    return json_parse(ala_config.BIOCACHE_WS, '/occurrences/search', query)
 
 
 def get_image_sync_steps(s3_bucket_avro: str, dataset_list: []):
@@ -111,16 +133,11 @@ def read_solr_collection_date() -> str:
         HTTPError: If an HTTP error occurs while requesting the Solr collection URL.
         ValueError: If the 'biocache' Solr collection is not found or its name is not in the expected format.
     """
-    url = f'{ala_config.SOLR_URL}/admin/collections?action=CLUSTERSTATUS'
-    log.info(f'Requesting URL: {url}')
-    with requests.get(url) as response:
-        log.info(f'response is {response}')
-        response.raise_for_status()
-        log.info(f'Response content is {response.content}')
-        solr_json = json.loads(response.content)
-        biocache_collection = solr_json['cluster']['aliases']['biocache']
-        matches = re.findall(r'.*-(\d{4}-\d{2}-\d{2})-.*', biocache_collection)
-        return matches[0]
+
+    json_str = json_parse(ala_config.SOLR_URL, '/admin/collections', {'action': 'CLUSTERSTATUS'})
+    biocache_collection = json_str['cluster']['aliases']['biocache']
+    matches = re.findall(r'.*-(\d{4}-\d{2}-\d{2})-.*', biocache_collection)
+    return matches[0]
 
 
 def get_recent_images_drs(start_date: str, end_date: str = None):
@@ -153,43 +170,13 @@ def get_recent_images_drs(start_date: str, end_date: str = None):
 
     drs = {}
     for date_str in generate_dates_str():
-        with requests.get(
-                f'{ala_config.IMAGES_URL}/ws/facet?q=*:*&fq=dateUploaded:{date_str}&facet=dataResourceUid') as \
-                response:
-            response.raise_for_status()
-            images_json = json.loads(response.content)
-            images_dr = images_json['dataResourceUid']
-            for dr, images_count in images_dr.items():
-                drs[dr] = images_count + (0 if dr not in [drs] else drs[dr])
+        images_json = json_parse(ala_config.IMAGES_URL, '/ws/facet', {'q': '*:*', 'fq': f'dateUploaded:{date_str}',
+                                                                      'facet': 'dataResourceUid'})
+        images_dr = images_json['dataResourceUid']
+        for dr, images_count in images_dr.items():
+            drs[dr] = images_count + (0 if dr not in [drs] else drs[dr])
     return {d: c for d, c in drs.items() if d != 'no_dataresource'}
 
-
-def get_dr_info(dr: str):
-    """
-    :param dr: data resource Uid
-    :return: (JSON metadata of a DR in collectory, count of the records in Biocache)
-    """
-
-    headers = {'Accept': 'application/json', 'Authorization': ala_config.ALA_API_KEY}
-    collectory_json = None
-    try:
-        with requests.get(f'{ala_config.REGISTRY_URL}/ws/dataResource/{dr}', headers=headers) as response:
-            response.raise_for_status()
-            collectory_json = json.loads(response.content)
-
-    except requests.exceptions.HTTPError as err:
-        raise SystemExit(err)
-
-    count = 0
-    try:
-        with requests.get(f'{ala_config.BIOCACHE_URL}/occurrences/search?q=data_resource_uid:{dr}&fq=&pageSize=0',
-                          headers=headers) as response:
-            response.raise_for_status()
-            biocache_json = json.loads(response.content)
-            count = biocache_json['totalRecords']
-    except requests.exceptions.HTTPError as err:
-        count = 0
-    return count
 
 
 def s3_cp(step_name, src, dest, action_on_failure='TERMINATE_CLUSTER'):
@@ -278,7 +265,6 @@ def step_cmd_args(step_name, cmd_arr, action_on_failure='TERMINATE_CLUSTER'):
 
 
 def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder='', time_range=(None, None)):
-
     def list_folders_in_bucket(bucket_name, obj_prefix, delimiter, regex):
         response = s3.list_objects_v2(Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter)
         folders = []
@@ -350,11 +336,16 @@ def list_drs_index_avro_in_bucket(**kwargs):
                                   time_range=(None, None) if "time_range" not in kwargs else kwargs[
                                       "time_range"])
 
+def list_drs_verbatim_avro_in_bucket(**kwargs):
+
+    return list_objects_in_bucket(kwargs['bucket'], 'pipelines-data/',
+                                  r'^.*/dr[0-9]+/1/verbatim/verbatim+[\-0-9of]*\.avro$', sub_dr_folder='',
+                                  time_range=(None, None) if "time_range" not in kwargs else kwargs[
+                                      "time_range"])
 
 def list_drs_ingested_since(**kwargs):
     return list_objects_in_bucket(kwargs['bucket'], 'pipelines-data/',
                                   r'.*', sub_dr_folder='1/interpretation-metrics.yml', time_range=kwargs['time_range'])
-
 
 
 def step_s3_cp_file(dr, source_path, target_path):

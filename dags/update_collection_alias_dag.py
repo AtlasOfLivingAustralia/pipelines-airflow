@@ -174,9 +174,24 @@ with DAG(dag_id=DAG_ID,
         task_id='assertion_sync_task',
         trigger_dag_id="Assertions-Sync",
         wait_for_completion=True,
-        trigger_rule=TriggerRule.ALL_DONE, )
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS, )
+
+    update_gbif_task = TriggerDagRunOperator(
+        task_id='update_gbif_task',
+        trigger_dag_id="Update_gbif_metadata",
+        wait_for_completion=True,
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS, )
+    
+    clear_dashboards_task = PythonOperator(
+        task_id='clear_dashboards',
+        python_callable=ala_helper.call_url,
+        provide_context=True,
+        op_args=[ala_config.DASHBOARD_CACHE_CLEAR_URL],
+    )
 
     for check in checks_available:
         PythonOperator(task_id=check, python_callable=locals()[check],
                        provide_context=True, ) >> switch_collection_alias_op
-    switch_collection_alias_op >> remove_old_collections_op >> assertion_sync_task
+    switch_collection_alias_op >> remove_old_collections_op 
+    remove_old_collections_op >> assertion_sync_task >> clear_dashboards_task
+    remove_old_collections_op >> update_gbif_task

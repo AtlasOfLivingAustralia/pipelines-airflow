@@ -6,6 +6,7 @@ import urllib.parse
 import argparse
 import re
 from distutils.util import strtobool
+import time
 
 checks_available = [
     "check_total_count",
@@ -27,7 +28,7 @@ checks_available.sort()
 RETRY_COUNT = 10
 RETRY_SLEEP_MILLI_SEC = 1 * 60 * 1000
 NUMBER_OF_COLLECTIONS_TO_KEEP = 1
-
+MIN_FACET_RECORD_COUNT = 1000
 
 class ResultStatus:
     PASS = "PASS"
@@ -62,17 +63,23 @@ def parse_params(kwargs):
 
 def json_parse(base_url: str, params, solr_cluster: str):
     url_str = solr_cluster + '/' + base_url + "?"
-    print(f"DEBUG- Reading url:{url_str} params:{params}")
-    try:
-        encoded_parameters = urllib.parse.urlencode(params)
-        response = request.urlopen(url_str + encoded_parameters)
-        response = json.loads(response.read().decode('utf-8'))
-        return response
-    except Exception as e:
-        print(
-            f"SEVERE- Error reading url:{url_str} params:{params} Exception:{e}")
-        raise RuntimeError(f'Error in processing URL:{url_str} params:{params}')
-
+    retry_count = RETRY_COUNT
+    while retry_count > 0:
+        try:
+            encoded_parameters = urllib.parse.urlencode(params)
+            response = request.urlopen(url_str + encoded_parameters)
+            response = json.loads(response.read().decode('utf-8'))
+            return response
+        except Exception as e:
+            print(f"WARNING- Error reading url:{url_str} params:{params} Exception:{e}")
+            retry_count -= 1
+            if retry_count > 0:
+                print(f"Retrying in {RETRY_SLEEP_MILLI_SEC / 1000} seconds.")
+                time.sleep(RETRY_SLEEP_MILLI_SEC / 1000)
+            else:
+                print(f"SEVERE- Error in processing URL:{url_str} params:{params}")
+                raise RuntimeError(f'Error in processing URL:{url_str} params:{params}')
+    return None
 
 def get_total_count(collection: str, solr_cluster: str):
     result = json_parse(f"{collection}/select", {'q': '*:*', 'rows': 0, 'wt': 'json', 'facet': 'false'},
@@ -85,29 +92,34 @@ def get_total_count(collection: str, solr_cluster: str):
 
 def check_minimum_field_count(minimum_field_count: int, record_id: str, collection):
     status = ResultStatus.PASS
-    result = json_parse(f'{collection}/select', {'q': 'id:' +
-                                                      record_id, 'rows': "10", 'wt': 'json', 'facet': 'false'},
+    result = json_parse(f'{collection}/select', {'q': f'id:"{record_id}"', 'rows': "10", 'wt': 'json', 'facet': 'false'},
                         solr_cluster=solr_base_new if solr_base_new else solr_base)
     if result is None:
         print(
-            f"SEVERE- Error checking minimum fields count. : minFieldCount: {minimum_field_count}, recordId: {record_id}, collection: {collection}")
+            f"SEVERE- Error checking minimum fields count. : minFieldCount: {minimum_field_count:,}, recordId: {record_id}, collection: {collection}")
         status = ResultStatus.FAIL
     else:
         docs = result['response']['docs']
-        if len(docs) != 1:
+        if len(docs) == 0 :
             status = ResultStatus.FAIL
             print(
-                f"SEVERE- RECORD ID: {record_id} - There should be only one record for the id but there are {len(docs)}")
+                f"SEVERE- RECORD ID: {record_id} - No records found for the id in collection: {collection}")
+        elif len(docs) > 1:
+            status = ResultStatus.FAIL
+            print(
+                f"SEVERE- RECORD ID: {record_id} - There are {len(docs):,} records for the id in collection: {collection}")
         else:
             doc = docs[0]
             if len(doc) < minimum_field_count:
                 status = ResultStatus.FAIL
                 print(
-                    f"SEVERE- RECORD ID: {record_id} - Number of fields are {len(doc)} and minimum fields of {minimum_field_count} not met.")
+                    f"SEVERE- RECORD ID: {record_id} - Number of fields are {len(doc):,} and minimum fields of {minimum_field_count:,} not met.")
     return status
 
 
 def compare_records(record_id: str):
+    # These fields are  part of the assertions and are not expected to be in the new index till the assertion-sync job runs
+    assertion_fields = ['userAssertions', 'userVerified', 'hasUserAssertions', 'assertionUserId', 'lastAssertionDate']
     status = ResultStatus.PASS
     result = json_parse(f'{new_collection}/select',
                         {'q': 'id:' + record_id, 'rows': "10",
@@ -127,15 +139,15 @@ def compare_records(record_id: str):
     old_docs = result['response']['docs']
     if len(new_docs) != 1 or len(old_docs) != 1:
         print(
-            f"SEVERE- RECORD ID: {record_id} - There should be only one record for the id in collection: {new_collection} , newDocs#:{len(new_docs)}, oldDocs#: {len(old_docs)}")
+            f"SEVERE- RECORD ID: {record_id} - There should be only one record for the id in collection: {new_collection} , newDocs#:{len(new_docs):,}, oldDocs#: {len(old_docs):,}")
         return ResultStatus.FAIL
     else:
         new_doc = new_docs[0]
         old_doc = old_docs[0]
-        missing_field_set = old_doc.keys() - new_doc.keys()
+        missing_field_set = old_doc.keys() - assertion_fields - new_doc.keys()
         if len(missing_field_set):
             print(
-                f"SEVERE- RECORD ID:{record_id} - There are {len(missing_field_set)} fields which are missing in the new records. Here is the list: {missing_field_set}")
+                f"SEVERE- RECORD ID:{record_id} - There are {len(missing_field_set):,} fields which are missing in the new records. Here is the list: {missing_field_set}")
             return ResultStatus.FAIL
         else:
             changed_fields = []
@@ -150,16 +162,16 @@ def compare_records(record_id: str):
             if len(changed_fields):
                 status = ResultStatus.WARN
                 print(
-                    f"WARNING- RECORD ID:{record_id} - There are {len(changed_fields)} fields which have different values. Here is the list of the fields and their values: {changed_fields}")
+                    f"WARNING- RECORD ID:{record_id} - There are {len(changed_fields):,} fields which have different values. Here is the list of the fields and their values: {changed_fields}")
             if len(new_changed_fields):
                 print(
-                    f"WARNING- RECORD ID:{record_id} - There are {len(new_changed_fields)} fields which have different values. Here is the list of the fields and their values: {new_changed_fields}")
+                    f"WARNING- RECORD ID:{record_id} - There are {len(new_changed_fields):,} fields which have different values. Here is the list of the fields and their values: {new_changed_fields}")
 
         added_field_set = new_doc.keys() - old_doc.keys()
         if len(added_field_set):
             status = ResultStatus.WARN
             print(
-                f"WARNING- RECORD ID:{record_id} - There are {len(added_field_set)} fields which are added to the new record. Here is the list: {added_field_set}")
+                f"WARNING- RECORD ID:{record_id} - There are {len(added_field_set):,} fields which are added to the new record. Here is the list: {added_field_set}")
 
     print(f"INFO- returning status: {status}")
     return status
@@ -193,15 +205,15 @@ def check_min_fields_for_random_records(**kwargs):
     if ResultStatus.FAIL in status_list:
         ret_status = ResultStatus.FAIL
         print(
-            f"SEVERE- There are {len([s for s in status_list if s == ResultStatus.FAIL])} FAILED records out of {records_number} checked ones.")
+            f"SEVERE- There are {len([s for s in status_list if s == ResultStatus.FAIL]):,} FAILED records out of {records_number:,} checked ones.")
     elif ResultStatus.WARN in status_list:
         ret_status = ResultStatus.WARN
         print(
-            f"WARNING- There are {len([s for s in status_list if s == ResultStatus.WARN])}  WARNING records out of {records_number} checked ones.")
+            f"WARNING- There are {len([s for s in status_list if s == ResultStatus.WARN]):,}  WARNING records out of {records_number:,} checked ones.")
     else:
         ret_status = ResultStatus.PASS
         print(
-            f"INFO- All {records_number} records checks passed successfully.")
+            f"INFO- All {records_number:,} records checks passed successfully.")
 
     return ret_status
 
@@ -258,25 +270,28 @@ def get_random_record_ids(collection: str, records_number: int, solr_cluster: st
             0, min(data_resources[data_resource], 20000))
 
         print(
-            f"Getting id for record at offset {record_offset} in data resource {data_resource} record count for data resource={data_resources[data_resource]} drOffset={dr_offset}")
+            f"Getting id for a record at offset {record_offset:,} in data resource {data_resource}, Dr#={data_resources[data_resource]} DrOffset={dr_offset:,}")
 
         result = json_parse(f'{collection}/select',
-                            {'q': 'dataResourceUid:' + data_resource, 'rows': "1", 'wt': 'json',
-                             'start': record_offset, 'fl': 'id',
+                            {'q': 'dataResourceUid:' + data_resource,
+                             'rows': "1",
+                             'wt': 'json',
+                             'start': record_offset,
+                             'fl': 'id',
                              'facet': 'false'}, solr_cluster)
 
         if result is None:
             print(
-                f"SEVERE- Error in getting random record Ids. dataResource:{data_resource}, recordOffset:{record_offset}")
+                f"SEVERE- Error in getting random record Ids. dataResource:{data_resource}, recordOffset:{record_offset:,}")
             return None
         if result['response']['docs'][0]['id'] is None:
             print(
-                f"SEVERE- Error in getting random record Ids. result contained a null id. dataResource:{data_resource}, recordOffset:{record_offset}, response:{result['response']}")
+                f"SEVERE- Error in getting random record Ids. result contained a null id. dataResource:{data_resource}, recordOffset:{record_offset:}, response:{result['response']}")
             return None
 
         if result['response']['docs'][0]['id'].lower() == "null":
             print(
-                f"SEVERE- Error in getting random record Ids. result contained the literal null. dataResource:{data_resource}, recordOffset:{record_offset}, response:{result['response']}")
+                f"SEVERE- Error in getting random record Ids. result contained the literal null. dataResource:{data_resource}, recordOffset:{record_offset:,}, response:{result['response']}")
             return None
 
         next_record_id = result['response']['docs'][0]['id']
@@ -301,32 +316,35 @@ def check_facet(facet: str, q: str, check_size: int = -1, fetch_size: int = -1, 
         facet]
     if new_facet_data is None or old_facet_data is None:
         print(
-            f"SEVERE- Error in checking facet. facet:{facet} q:{q} limit:{check_size} sort:{sort}")
+            f"SEVERE- Error in checking facet. facet:{facet} q:{q} limit:{check_size:,} sort:{sort}")
         return ResultStatus.FAIL
     status = ResultStatus.PASS
     ret_status = []
     for key, value in old_facet_data.items():
         if key in new_facet_data:
-            diff_percentage = round(
-                ((value - new_facet_data[key]) / value) * 100)
-
+            cur_value = value
+            new_value = new_facet_data[key]
+            diff_count = new_value - cur_value
+            diff_percentage = round(((cur_value - new_value) / cur_value) * 100)
+            record_count_change_severe = True
+            if cur_value < MIN_FACET_RECORD_COUNT and new_value > 0 :
+                record_count_change_severe = False
             # More than 2% of records are missing this field value in the new index
-            if diff_percentage > 2:
+            if diff_percentage > 2 and record_count_change_severe:
                 status = ResultStatus.FAIL
-                print(
-                    f"SEVERE- {diff_percentage}% of records don't have {facet}=\"{key}\" . Counts- Current#:{value} New#: {new_facet_data[key]} Diff#:{value - new_facet_data[key]}")
+                print(f"SEVERE- {diff_percentage:,}% of records don't have {facet}=\"{key}\" . Counts- Current#:{cur_value:,} New#: {new_value:,} Diff#:{diff_count:,}")
             elif new_facet_data[key] < value:
                 status = ResultStatus.WARN
                 print(
-                    f"WARNING- {diff_percentage}% of records don't have {facet}=\"{key}\" . Counts- Current#:{value} New#:{new_facet_data[key]} Diff#:{value - new_facet_data[key]}")
+                    f"WARNING- {diff_percentage:,}% of records don't have {facet}=\"{key}\" . Counts- Current#:{cur_value:,} New#:{new_value:,} Diff#:{diff_count:,}")
             elif new_facet_data[key] > value:
                 status = ResultStatus.PASS
                 print(
-                    f"INFO- There are more record having {facet}=\"{key}\" in the new index. Counts- Current#:{value} New#:{new_facet_data[key]} Diff#:{new_facet_data[key] - value}")
+                    f"INFO- There are more record having {facet}=\"{key}\" in the new index. Counts- Current#:{cur_value:,} New#:{new_value:,} Diff#:{diff_count:,}")
             else:
                 status = ResultStatus.PASS
                 print(
-                    f"INFO- There are same number of records for {facet}=\"{key}\" in both indexes. Counts#:{value}")
+                    f"INFO- There are same number of records for {facet}=\"{key}\" in both indexes. Counts#:{cur_value:,}")
         else:
             status = ResultStatus.FAIL
             print(
@@ -346,7 +364,7 @@ def check_compare_random_records(**kwargs):
     ret_status = ResultStatus.PASS
     if not record_ids:
         print(
-            f"SEVERE- Error in the check of comparing random records. recordsNumber:{records_number}")
+            f"SEVERE- Error in the check of comparing random records. recordsNumber:{records_number:,}")
         ret_status = ResultStatus.FAIL
     else:
         if len(record_ids) < records_number:
@@ -369,15 +387,15 @@ def check_compare_random_records(**kwargs):
         if failure_count:
             ret_status = ResultStatus.FAIL
             print(
-                f"SEVERE- There are {failure_count} FAILED records and {warning_count} WARNING records out of {len(record_ids)} checked ones.")
+                f"SEVERE- There are {failure_count:,} FAILED records and {warning_count:,} WARNING records out of {len(record_ids):,} checked ones.")
         elif failure_count or warning_count:
             ret_status = ResultStatus.WARN
             print(
-                f"WARNING- There are {failure_count} FAILED records and {warning_count} WARNING records out of {len(record_ids)} checked ones.")
+                f"WARNING- There are {failure_count:,} FAILED records and {warning_count:,} WARNING records out of {len(record_ids):,} checked ones.")
         else:
             ret_status = ResultStatus.PASS
             print(
-                f"INFO- All {len(record_ids)} records checks passed successfully.")
+                f"INFO- All {len(record_ids):,} records checks passed successfully.")
     return ret_status
 
 
@@ -387,20 +405,21 @@ def check_total_count(**kwargs):
     old_count = get_total_count(old_collection, solr_cluster=solr_base)
     new_count = get_total_count(new_collection,
                                 solr_cluster=solr_base_new if solr_base_new else solr_base)
+    diff_count = new_count - old_count
     if old_count < 0 or new_count < 0:
         raise ValueError("SEVERE- Error getting total count for collections")
-    if new_count >= old_count:
+    if new_count == old_count:
         print(
-            f"INFO- There are more or equal records in the new index than the current one. CURRENT#: {old_count} NEW#: {new_count} DIFF#: {new_count - old_count}")
+            f"INFO- There are equal number of records in the new index to the current one. CURRENT#: {old_count:,} NEW#: {new_count:,} DIFF#: {diff_count:,}")
         ret = ResultStatus.PASS
-    elif ((old_count - new_count) / old_count) > 0.001:
+    elif new_count > old_count:
         print(
-            f"SEVERE- There are less records in the new index than the current one [more than 0.1%]. CURRENT#: {old_count} NEW#: {new_count} DIFF#: {new_count - old_count}")
-        ret = ResultStatus.FAIL
+            f"INFO- There are more records in the new index than the current one. CURRENT#: {old_count:,} NEW#: {new_count:,} DIFF#: {diff_count:,}")
+        ret = ResultStatus.PASS
     else:
         print(
-            f"WARNING- There are less records in the new index than the current one. CURRENT#: {old_count} NEW#: {new_count} DIFF#: {new_count - old_count}")
-        ret = ResultStatus.WARN
+            f"SEVERE- There are less records in the new index than the current one. CURRENT#: {old_count:,} NEW#: {new_count:,} DIFF#: {diff_count:,}")
+        ret = ResultStatus.FAIL
     return ret
 
 
