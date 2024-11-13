@@ -4,17 +4,16 @@ from distutils.util import strtobool
 from airflow import DAG
 from airflow.operators.python import PythonOperator, ShortCircuitOperator
 
-from airflow.providers.amazon.aws.operators.emr_create_job_flow import EmrCreateJobFlowOperator
-from airflow.providers.amazon.aws.operators.emr_add_steps import EmrAddStepsOperator
-from airflow.providers.amazon.aws.sensors.emr_step import EmrStepSensor
-from airflow.providers.amazon.aws.sensors.emr_job_flow import EmrJobFlowSensor
+from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator
+from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator
+from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
+from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 
 from airflow.utils.dates import days_ago
 from datetime import timedelta
 
-from ala import cluster_setup, ala_config, ala_helper
+from ala import cluster_setup, ala_config
 from ala.ala_helper import step_bash_cmd, get_default_args
-
 
 DAG_ID = 'Ingest_large_datasets'
 
@@ -28,7 +27,7 @@ def get_dwca_steps(dataset_list):
 
 def get_avro_steps(dataset_list):
     return [
-        step_bash_cmd("a. Download verbatim AVRO", f" /tmp/download-datasets-avro-hdfs.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}")
+        step_bash_cmd("a. Download Verbatim AVRO", f" /tmp/download-datasets-avro-hdfs.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}")
     ]
 
 
@@ -51,15 +50,31 @@ def get_load_image_steps(dataset_list):
     ]
 
 
-def get_post_image_steps(dataset_list):
-    return [
+def get_post_image_steps(dataset_list, run_indexing=False):
+    processing = [
         step_bash_cmd("f. Image syncing", f" la-pipelines image-sync {dataset_list} --cluster"),
-        step_bash_cmd("g. Index", f" la-pipelines index {dataset_list} --cluster"),
+        step_bash_cmd("g. Index", f" la-pipelines index {dataset_list} --cluster")
+    ]
+    if run_indexing:
+        solr_ws = f"{ala_config.SOLR_URL}/{ala_config.SOLR_COLLECTION}/update?commit=true"
+        datasets = [dataset_uid for dataset_uid in dataset_list.split() if dataset_uid]
+        for dataset_uid in datasets:
+            processing.append(
+                    step_bash_cmd( f"h-1-{dataset_uid}. SOLR - Delete existing {dataset_uid}",  f" curl {solr_ws} -H 'Content-Type: text/xml'  --data-binary '<delete><query>dataResourceUid:{dataset_uid}</query></delete>'", action_on_failure="CONTINUE")
+                )
+        processing.append(
+            step_bash_cmd("h-2. SOLR", f" la-pipelines solr {dataset_list} --cluster")
+        )
+
+    post_processing = [
         step_bash_cmd("h. Export", f" la-pipelines dwca-export {dataset_list} --cluster"),
         step_bash_cmd("i. Add Frictionless", f" /tmp/frictionless.sh {dataset_list}"),
         step_bash_cmd("j. Upload data", f" /tmp/upload-hdfs-datasets.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}"),
         step_bash_cmd("k. Upload export", f" /tmp/upload-export.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}")
     ]
+
+    processing = processing + post_processing
+    return processing
 
 
 with DAG(
@@ -74,6 +89,7 @@ with DAG(
             "datasetIds": "dr18391",
             "load_images": "false",
             "skip_dwca_to_verbatim": "false",
+            "run_indexing": "false",
             "override_uuid_percentage_check": "false"
         }
 ) as dag:
@@ -85,9 +101,11 @@ with DAG(
             return True
         return False
 
+
     def construct_steps_with_options(**kwargs):
 
         load_images = strtobool(kwargs['dag_run'].conf['load_images'])
+        run_indexing = strtobool(kwargs['dag_run'].conf['run_indexing'])
         skip_dwca_to_verbatim = strtobool(kwargs['dag_run'].conf['skip_dwca_to_verbatim'])
         override_uuid_percentage = strtobool(kwargs['dag_run'].conf['override_uuid_percentage_check'])
         dataset_list = kwargs['dag_run'].conf['datasetIds']
@@ -106,7 +124,7 @@ with DAG(
         if load_images:
             steps.extend(get_load_image_steps(dataset_list))
 
-        steps.extend(get_post_image_steps(dataset_list))
+        steps.extend(get_post_image_steps(dataset_list, run_indexing))
         return steps
 
 

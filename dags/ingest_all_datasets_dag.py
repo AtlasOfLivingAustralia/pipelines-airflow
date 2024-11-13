@@ -141,6 +141,7 @@ with DAG(
                 conf={
                     "datasetIds": "{{ task_instance.xcom_pull(task_ids='process_%s', key='process_%s_batch%i') }}" % (cat, cat, i),
                     "load_images": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='load_images') }}",
+                    "run_indexing": "false",
                     "skip_dwca_to_verbatim": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='skip_dwca_to_verbatim') }}",
                     "override_uuid_percentage_check": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='override_uuid_percentage_check') }}"
                 }

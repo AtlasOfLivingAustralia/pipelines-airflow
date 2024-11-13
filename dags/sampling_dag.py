@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.utils.dates import days_ago
 from datetime import timedelta
-from ala import cluster_setup, ala_config, ala_helper
+from ala import cluster_setup, ala_config
 from ala.ala_helper import step_bash_cmd, s3_cp, get_default_args
 
 DAG_ID = 'Sampling'

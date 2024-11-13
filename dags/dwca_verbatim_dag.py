@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.utils.dates import days_ago
 from datetime import timedelta
-from ala import ala_helper, cluster_setup, ala_config
+from ala import cluster_setup, ala_config
 from ala.ala_helper import step_bash_cmd, get_default_args
 
 DAG_ID = 'Dwca_verbatim_dag'
