@@ -36,7 +36,7 @@ def json_parse(base_url: str, url_path: str, params={}, headers=None):
     :return: is the json response from the URL
     """
     try:
-        full_url = urljoin(base_url, url_path)
+        full_url = urljoin(base_url.rstrip('/') + '/', url_path.lstrip('/'))
         with requests.get(full_url, params, headers=headers) as response:
             response.raise_for_status()
             json_result = json.loads(response.content)
