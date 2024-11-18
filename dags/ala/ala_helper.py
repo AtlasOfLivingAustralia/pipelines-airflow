@@ -5,8 +5,6 @@ import os
 import re
 from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
-from requests.compat import urljoin
-
 import boto3
 import requests
 
@@ -26,6 +24,14 @@ def call_url(url, headers=None) -> str:
         logging.error(f"Error encountered during request {url}", err)
         raise IOError(err)
 
+def join_url(*url_fragments:str) -> str:
+    """
+    Joins multiple URL fragments into a single URL.
+
+    :param url_fragments: URL fragments to be joined.
+    :return: A single URL string.
+    """
+    return '/'.join(fragment.strip('/') for fragment in url_fragments)
 
 def json_parse(base_url: str, url_path: str, params={}, headers=None):
     """
@@ -36,7 +42,7 @@ def json_parse(base_url: str, url_path: str, params={}, headers=None):
     :return: is the json response from the URL
     """
     try:
-        full_url = urljoin(base_url.rstrip('/') + '/', url_path.lstrip('/'))
+        full_url = join_url(base_url, url_path)
         with requests.get(full_url, params, headers=headers) as response:
             response.raise_for_status()
             json_result = json.loads(response.content)
