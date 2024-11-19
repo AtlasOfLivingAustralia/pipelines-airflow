@@ -3,7 +3,6 @@ from datetime import timedelta
 import jwt
 import time
 import requests
-from requests.compat import urljoin
 from airflow.decorators import task, dag
 from airflow.utils.dates import days_ago
 import logging
@@ -54,7 +53,7 @@ def taskflow():
             
         
         try:
-            sync_url = urljoin(ala_config.BIOCACHE_URL.rstrip('/') + '/', 'sync')
+            sync_url = ala_helper.join_url(ala_config.BIOCACHE_URL, 'sync')
             r = requests.get(sync_url, headers=headers)
             r.raise_for_status()
             print(f"Sync API called successfully and here is status code: {r.status_code}, and text:{r.text}")
