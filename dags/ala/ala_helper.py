@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
 import boto3
 import requests
+import zipfile
 
 from ala import ala_config
 
@@ -401,3 +402,21 @@ def get_default_args():
         'email_on_retry': False,
         'retries': 0,
     }
+
+def validate_jar(jar_file):
+    try:
+        # Try to open the file as a ZIP archive (JAR files are ZIP archives)
+        with zipfile.ZipFile(jar_file, 'r') as jar:
+            # Check for essential JAR metadata
+            meta_entries = [entry for entry in jar.namelist() if entry.endswith('MANIFEST.MF')]
+            
+            # Optional: Additional checks
+            if not any(entry.endswith('.class') for entry in jar.namelist()):
+                raise ValueError("No Java class files found in the archive")
+            
+            print(f"{jar_file} is a valid Java archive")
+            return True
+    except zipfile.BadZipFile:
+        raise ValueError(f"{jar_file} is not a valid Java archive")
+    except FileNotFoundError:
+        raise FileNotFoundError(f"JAR file {jar_file} not found")
