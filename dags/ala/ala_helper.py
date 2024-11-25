@@ -14,6 +14,7 @@ from ala import ala_config
 log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
 
+
 def call_url(url, headers=None) -> requests.Response:
     try:
         print(f"Calling URL: {url}")
@@ -25,14 +26,16 @@ def call_url(url, headers=None) -> requests.Response:
         logging.error(f"Error encountered during request {url}", err)
         raise IOError(err)
 
-def join_url(*url_fragments:str) -> str:
+
+def join_url(*url_fragments: str) -> str:
     """
     Joins multiple URL fragments into a single URL.
 
     :param url_fragments: URL fragments to be joined.
     :return: A single URL string.
     """
-    return '/'.join(fragment.strip('/') for fragment in url_fragments)
+    return "/".join(fragment.strip("/") for fragment in url_fragments)
+
 
 def json_parse(base_url: str, url_path: str, params={}, headers=None):
     """
@@ -49,7 +52,9 @@ def json_parse(base_url: str, url_path: str, params={}, headers=None):
             json_result = json.loads(response.content)
             return json_result
     except requests.exceptions.HTTPError as err:
-        logging.error(f"Error encountered during request {full_url} with params {params}", err)
+        logging.error(
+            f"Error encountered during request {full_url} with params {params}", err
+        )
         raise IOError(err)
 
 
@@ -64,8 +69,12 @@ def get_dr_count(dr: str):
     :raises requests.exceptions.HTTPError: If an HTTP error occurs while making the request to Biocache.
     """
     try:
-        biocache_json = json_parse(ala_config.BIOCACHE_WS, '/occurrences/search', {'q': f'data_resource_uid:{dr}', 'pageSize': '0'})
-        return biocache_json['totalRecords']
+        biocache_json = json_parse(
+            ala_config.BIOCACHE_WS,
+            "/occurrences/search",
+            {"q": f"data_resource_uid:{dr}", "pageSize": "0"},
+        )
+        return biocache_json["totalRecords"]
     except requests.exceptions.HTTPError as err:
         return 0
 
@@ -85,7 +94,7 @@ def search_biocache(query: str):
 
     See https://biocache.ala.org.au/ws for more information on the Biocache web service.
     """
-    return json_parse(ala_config.BIOCACHE_WS, '/occurrences/search', query)
+    return json_parse(ala_config.BIOCACHE_WS, "/occurrences/search", query)
 
 
 def get_image_sync_steps(s3_bucket_avro: str, dataset_list: []):
@@ -120,12 +129,22 @@ def get_image_sync_steps(s3_bucket_avro: str, dataset_list: []):
             print(step["command"])
     """
     return [
-        step_bash_cmd("Download datasets avro",
-                      f" /tmp/download-datasets-image-sync.sh {s3_bucket_avro} {dataset_list}"),
-        step_bash_cmd("Image sync", f" la-pipelines image-sync {dataset_list} --cluster"),
-        step_bash_cmd("Index", f" la-pipelines index {dataset_list} --cluster --extra-args timeBufferInMillis=604800000"),
-        step_bash_cmd("Upload datasets avro",
-                      f" /tmp/upload-indexed-image-sync-datasets.sh {s3_bucket_avro} {dataset_list}")]
+        step_bash_cmd(
+            "Download datasets avro",
+            f" /tmp/download-datasets-image-sync.sh {s3_bucket_avro} {dataset_list}",
+        ),
+        step_bash_cmd(
+            "Image sync", f" la-pipelines image-sync {dataset_list} --cluster"
+        ),
+        step_bash_cmd(
+            "Index",
+            f" la-pipelines index {dataset_list} --cluster --extra-args timeBufferInMillis=604800000",
+        ),
+        step_bash_cmd(
+            "Upload datasets avro",
+            f" /tmp/upload-indexed-image-sync-datasets.sh {s3_bucket_avro} {dataset_list}",
+        ),
+    ]
 
 
 def read_solr_collection_date() -> str:
@@ -141,9 +160,11 @@ def read_solr_collection_date() -> str:
         ValueError: If the 'biocache' Solr collection is not found or its name is not in the expected format.
     """
 
-    json_str = json_parse(ala_config.SOLR_URL, '/admin/collections', {'action': 'CLUSTERSTATUS'})
-    biocache_collection = json_str['cluster']['aliases']['biocache']
-    matches = re.findall(r'.*-(\d{4}-\d{2}-\d{2})-.*', biocache_collection)
+    json_str = json_parse(
+        ala_config.SOLR_URL, "/admin/collections", {"action": "CLUSTERSTATUS"}
+    )
+    biocache_collection = json_str["cluster"]["aliases"]["biocache"]
+    matches = re.findall(r".*-(\d{4}-\d{2}-\d{2})-.*", biocache_collection)
     return matches[0]
 
 
@@ -177,73 +198,61 @@ def get_recent_images_drs(start_date: str, end_date: str = None):
 
     drs = {}
     for date_str in generate_dates_str():
-        images_json = json_parse(ala_config.IMAGES_URL, '/ws/facet', {'q': '*:*', 'fq': f'dateUploaded:{date_str}',
-                                                                      'facet': 'dataResourceUid'})
-        images_dr = images_json['dataResourceUid']
+        images_json = json_parse(
+            ala_config.IMAGES_URL,
+            "/ws/facet",
+            {"q": "*:*", "fq": f"dateUploaded:{date_str}", "facet": "dataResourceUid"},
+        )
+        images_dr = images_json["dataResourceUid"]
         for dr, images_count in images_dr.items():
             drs[dr] = images_count + (0 if dr not in [drs] else drs[dr])
-    return {d: c for d, c in drs.items() if d != 'no_dataresource'}
+    return {d: c for d, c in drs.items() if d != "no_dataresource"}
 
 
-
-def s3_cp(step_name, src, dest, action_on_failure='TERMINATE_CLUSTER'):
+def s3_cp(step_name, src, dest, action_on_failure="TERMINATE_CLUSTER"):
     return {
         "Name": step_name,
         "ActionOnFailure": action_on_failure,
         "HadoopJarStep": {
             "Jar": "/usr/share/aws/emr/s3-dist-cp/lib/s3-dist-cp.jar",
-            "Args": [
-                f"--src={src}",
-                f"--dest={dest}"
-            ]
-        }
+            "Args": [f"--src={src}", f"--dest={dest}"],
+        },
     }
 
 
-def step_bash_cmd(step_name, cmd, action_on_failure='TERMINATE_CLUSTER'):
+def step_bash_cmd(step_name, cmd, action_on_failure="TERMINATE_CLUSTER"):
     """
-      Returns a dictionary that represents an AWS EMR step
-      to execute a Bash command on the cluster.
+    Returns a dictionary that represents an AWS EMR step
+    to execute a Bash command on the cluster.
 
-      Args:
-          step_name (str): The name of the step.
-          cmd (str): The Bash command to execute.
-          action_on_failure (str, optional): The action to take if the step fails.
-              Defaults to 'TERMINATE_CLUSTER'.
+    Args:
+        step_name (str): The name of the step.
+        cmd (str): The Bash command to execute.
+        action_on_failure (str, optional): The action to take if the step fails.
+            Defaults to 'TERMINATE_CLUSTER'.
 
-      Returns:
-          dict: A dictionary representing the EMR step to execute the Bash command.
-      """
+    Returns:
+        dict: A dictionary representing the EMR step to execute the Bash command.
+    """
     return {
         "Name": step_name,
         "ActionOnFailure": action_on_failure,
-        "HadoopJarStep": {
-            "Jar": "command-runner.jar",
-            "Args": [
-                "bash",
-                "-c",
-                cmd
-            ]
-        }
+        "HadoopJarStep": {"Jar": "command-runner.jar", "Args": ["bash", "-c", cmd]},
     }
 
 
-def emr_python_step(name, full_py_cmd, action_on_failure='TERMINATE_CLUSTER'):
+def emr_python_step(name, full_py_cmd, action_on_failure="TERMINATE_CLUSTER"):
     return {
         "Name": name,
         "ActionOnFailure": action_on_failure,
         "HadoopJarStep": {
             "Jar": "command-runner.jar",
-            "Args": [
-                "bash",
-                "-c",
-                f" sudo -u hadoop python3 {full_py_cmd}"
-            ]
-        }
+            "Args": ["bash", "-c", f" sudo -u hadoop python3 {full_py_cmd}"],
+        },
     }
 
 
-def step_cmd_args(step_name, cmd_arr, action_on_failure='TERMINATE_CLUSTER'):
+def step_cmd_args(step_name, cmd_arr, action_on_failure="TERMINATE_CLUSTER"):
     """
     Create a dictionary representing an EMR step.
 
@@ -264,50 +273,66 @@ def step_cmd_args(step_name, cmd_arr, action_on_failure='TERMINATE_CLUSTER'):
     return {
         "Name": step_name,
         "ActionOnFailure": action_on_failure,
-        'HadoopJarStep': {
-            'Jar': 'command-runner.jar',
-            'Args': cmd_arr
-        }
+        "HadoopJarStep": {"Jar": "command-runner.jar", "Args": cmd_arr},
     }
 
 
-def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder='', time_range=(None, None)):
+def list_objects_in_bucket(
+    bucket_name, obj_prefix, obj_key_regex, sub_dr_folder="", time_range=(None, None)
+):
     def list_folders_in_bucket(bucket_name, obj_prefix, delimiter, regex):
-        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter)
+        response = s3.list_objects_v2(
+            Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter
+        )
         folders = []
         while True:
-            folders += [o.get('Prefix').split('/')[-2] for o in response.get('CommonPrefixes')]
+            folders += [
+                o.get("Prefix").split("/")[-2] for o in response.get("CommonPrefixes")
+            ]
 
             # Check if there are more results to retrieve
-            if response.get('NextContinuationToken'):
+            if response.get("NextContinuationToken"):
                 # Make another request with the continuation token
-                response = s3.list_objects_v2(Bucket=bucket_name, Prefix=obj_prefix,
-                                              Delimiter=delimiter,
-                                              ContinuationToken=response.get('NextContinuationToken'))
+                response = s3.list_objects_v2(
+                    Bucket=bucket_name,
+                    Prefix=obj_prefix,
+                    Delimiter=delimiter,
+                    ContinuationToken=response.get("NextContinuationToken"),
+                )
             else:
                 break
 
         dr_pattern = re.compile(regex)
-        drs = [dr for dr in list(filter(dr_pattern.match, folders)) if dr not in ala_config.EXCLUDED_DATASETS]
+        drs = [
+            dr
+            for dr in list(filter(dr_pattern.match, folders))
+            if dr not in ala_config.EXCLUDED_DATASETS
+        ]
         return drs
 
     def process_prefix(l_prefix, l_dr):
         results = {}
-        paginator = s3.get_paginator('list_objects_v2')
+        paginator = s3.get_paginator("list_objects_v2")
         page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=l_prefix)
 
         for page in page_iterator:
-            for my_bucket_object in page.get('Contents', []):
-                matches = list(re.findall(obj_key_regex, my_bucket_object['Key']))
+            for my_bucket_object in page.get("Contents", []):
+                matches = list(re.findall(obj_key_regex, my_bucket_object["Key"]))
                 if matches:
                     lower_range = True
                     higher_range = True
                     if time_range[0]:
-                        lower_range = my_bucket_object['LastModified'].isoformat() >= time_range[0]
+                        lower_range = (
+                            my_bucket_object["LastModified"].isoformat()
+                            >= time_range[0]
+                        )
                     if time_range[1]:
-                        higher_range = my_bucket_object['LastModified'].isoformat() <= time_range[1]
+                        higher_range = (
+                            my_bucket_object["LastModified"].isoformat()
+                            <= time_range[1]
+                        )
                     if lower_range and higher_range:
-                        results[l_dr] = my_bucket_object['Size']
+                        results[l_dr] = my_bucket_object["Size"]
 
         return results
 
@@ -315,11 +340,13 @@ def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         session = boto3.Session()
-        s3 = session.client('s3')
-        drs = list_folders_in_bucket(bucket_name, obj_prefix, delimiter='/', regex=r'^dr[0-9]+$')
+        s3 = session.client("s3")
+        drs = list_folders_in_bucket(
+            bucket_name, obj_prefix, delimiter="/", regex=r"^dr[0-9]+$"
+        )
         futures = []
         for dr in drs:
-            prefix = f'{obj_prefix}{dr}/{sub_dr_folder}'
+            prefix = f"{obj_prefix}{dr}/{sub_dr_folder}"
             futures.append(executor.submit(process_prefix, prefix, dr))
         datasets = {}
         for future in concurrent.futures.as_completed(futures):
@@ -334,34 +361,47 @@ def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder
 
 
 def list_drs_dwca_in_bucket(**kwargs):
-    return list_objects_in_bucket(kwargs['bucket'], 'dwca-imports/', r'^.*/(dr[0-9]+)\.zip$', sub_dr_folder='')
+    return list_objects_in_bucket(
+        kwargs["bucket"], "dwca-imports/", r"^.*/(dr[0-9]+)\.zip$", sub_dr_folder=""
+    )
 
 
 def list_drs_index_avro_in_bucket(**kwargs):
-    return list_objects_in_bucket(kwargs['bucket'], 'pipelines-all-datasets/index-record/',
-                                  r'^.*/dr[0-9]+/dr[0-9]+[\-0-9of]*\.avro$', sub_dr_folder='',
-                                  time_range=(None, None) if "time_range" not in kwargs else kwargs[
-                                      "time_range"])
+    return list_objects_in_bucket(
+        kwargs["bucket"],
+        "pipelines-all-datasets/index-record/",
+        r"^.*/dr[0-9]+/dr[0-9]+[\-0-9of]*\.avro$",
+        sub_dr_folder="",
+        time_range=(None, None) if "time_range" not in kwargs else kwargs["time_range"],
+    )
+
 
 def list_drs_verbatim_avro_in_bucket(**kwargs):
 
-    return list_objects_in_bucket(kwargs['bucket'], 'pipelines-data/',
-                                  r'^.*/dr[0-9]+/1/verbatim/verbatim+[\-0-9of]*\.avro$', sub_dr_folder='',
-                                  time_range=(None, None) if "time_range" not in kwargs else kwargs[
-                                      "time_range"])
+    return list_objects_in_bucket(
+        kwargs["bucket"],
+        "pipelines-data/",
+        r"^.*/dr[0-9]+/1/verbatim/verbatim+[\-0-9of]*\.avro$",
+        sub_dr_folder="",
+        time_range=(None, None) if "time_range" not in kwargs else kwargs["time_range"],
+    )
+
 
 def list_drs_ingested_since(**kwargs):
-    return list_objects_in_bucket(kwargs['bucket'], 'pipelines-data/',
-                                  r'.*', sub_dr_folder='1/interpretation-metrics.yml', time_range=kwargs['time_range'])
+    return list_objects_in_bucket(
+        kwargs["bucket"],
+        "pipelines-data/",
+        r".*",
+        sub_dr_folder="1/interpretation-metrics.yml",
+        time_range=kwargs["time_range"],
+    )
 
 
 def step_s3_cp_file(dr, source_path, target_path):
-    return step_cmd_args(f"Copy {source_path} to {target_path} for {dr}", [
-        "aws",
-        "s3",
-        "cp",
-        source_path,
-        target_path])
+    return step_cmd_args(
+        f"Copy {source_path} to {target_path} for {dr}",
+        ["aws", "s3", "cp", source_path, target_path],
+    )
 
 
 def hdfs_dwca_exist(s3_pipelines_dwca) -> dict:
@@ -369,19 +409,21 @@ def hdfs_dwca_exist(s3_pipelines_dwca) -> dict:
     s3 = boto3.resource(parsed_url.scheme)
     pipelines_s3_bucket = s3.Bucket(parsed_url.hostname)
     print(f"Checking s3 bucket {parsed_url.hostname} for resource {parsed_url.path}")
-    file_exist = bool(list(pipelines_s3_bucket.objects.filter(Prefix=parsed_url.path.lstrip('/'))))
+    file_exist = bool(
+        list(pipelines_s3_bucket.objects.filter(Prefix=parsed_url.path.lstrip("/")))
+    )
     print(f"Check {s3_pipelines_dwca}. Resource returned: {file_exist}")
     return file_exist
 
 
 def get_type(path):
-    multimedia_list = ['multimedia', 'image', 'images', 'sounds']
+    multimedia_list = ["multimedia", "image", "images", "sounds"]
 
     def is_multimedia(path):
         return any(part_str in path for part_str in multimedia_list)
 
     # returns occurrence by default
-    return 'multimedia' if is_multimedia(path) else 'occurrence'
+    return "multimedia" if is_multimedia(path) else "occurrence"
 
 
 # raise error if the path is not a file and is a directory. Considered a file if it has extension
@@ -395,28 +437,41 @@ def get_file_name(path):
 
 def get_default_args():
     return {
-        'owner': 'airflow',
-        'depends_on_past': False,
-        'email': [ala_config.ALERT_EMAIL],
-        'email_on_failure': False,
-        'email_on_retry': False,
-        'retries': 0,
+        "owner": "airflow",
+        "depends_on_past": False,
+        "email": [ala_config.ALERT_EMAIL],
+        "email_on_failure": False,
+        "email_on_retry": False,
+        "retries": 0,
     }
+
 
 def validate_jar(jar_file):
     try:
         # Try to open the file as a ZIP archive (JAR files are ZIP archives)
-        with zipfile.ZipFile(jar_file, 'r') as jar:
+        with zipfile.ZipFile(jar_file, "r") as jar:
             # Check for essential JAR metadata
-            meta_entries = [entry for entry in jar.namelist() if entry.endswith('MANIFEST.MF')]
-            
+            meta_entries = [
+                entry for entry in jar.namelist() if entry.endswith("MANIFEST.MF")
+            ]
+
             # Optional: Additional checks
-            if not any(entry.endswith('.class') for entry in jar.namelist()):
+            if not any(entry.endswith(".class") for entry in jar.namelist()):
                 raise ValueError("No Java class files found in the archive")
-            
+
             print(f"{jar_file} is a valid Java archive")
             return True
     except zipfile.BadZipFile:
         raise ValueError(f"{jar_file} is not a valid Java archive")
     except FileNotFoundError:
         raise FileNotFoundError(f"JAR file {jar_file} not found")
+
+
+def enable_debugpy():
+    import debugpy
+
+    if debugpy.is_client_connected():
+        print("Debugger already connected")
+    else:
+        debugpy.listen(("0.0.0.0", 10001))
+        debugpy.wait_for_client()
