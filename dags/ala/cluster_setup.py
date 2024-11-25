@@ -4,38 +4,50 @@ from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 from ala import ala_config
 from dataclasses import dataclass, field
+import re
 
 
-def run_large_emr(dag, spark_steps, bootstrap_script, ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB, cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT):
+def run_large_emr(
+    dag,
+    spark_steps,
+    bootstrap_script,
+    ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB,
+    cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT,
+):
     cluster_creator = EmrCreateJobFlowOperator(
         dag=dag,
-        task_id='create_emr_cluster',
-        emr_conn_id='emr_default',
-        job_flow_overrides=get_large_cluster(dag.dag_id, bootstrap_script, ebs_size_in_gb=ebs_size_in_gb, cluster_size=cluster_size),
-        aws_conn_id='aws_default'
+        task_id="create_emr_cluster",
+        emr_conn_id="emr_default",
+        job_flow_overrides=get_large_cluster(
+            dag.dag_id,
+            bootstrap_script,
+            ebs_size_in_gb=ebs_size_in_gb,
+            cluster_size=cluster_size,
+        ),
+        aws_conn_id="aws_default",
     )
 
     step_adder = EmrAddStepsOperator(
         dag=dag,
-        task_id='add_steps',
+        task_id="add_steps",
         job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_cluster', key='return_value') }}",
-        aws_conn_id='aws_default',
-        steps=spark_steps
+        aws_conn_id="aws_default",
+        steps=spark_steps,
     )
 
     step_checker = EmrStepSensor(
         dag=dag,
-        task_id='watch_step',
+        task_id="watch_step",
         job_flow_id="{{ task_instance.xcom_pull('create_emr_cluster', key='return_value') }}",
         step_id="{{ task_instance.xcom_pull(task_ids='add_steps', key='return_value')[0] }}",
-        aws_conn_id='aws_default'
+        aws_conn_id="aws_default",
     )
 
     wait_for_termination = EmrJobFlowSensor(
         dag=dag,
-        task_id='wait_for_cluster_termination',
+        task_id="wait_for_cluster_termination",
         job_flow_id="{{ task_instance.xcom_pull('create_emr_cluster', key='return_value') }}",
-        aws_conn_id='aws_default'
+        aws_conn_id="aws_default",
     )
 
     cluster_creator >> step_adder >> step_checker >> wait_for_termination
@@ -49,20 +61,48 @@ def obj_as_dict(obj):
     :type obj: object
     :return: dictionary with the attributes of obj that are in the
         __add_to_dict__ list
-    
+
     """
-    return {attr: getattr(obj, attr) for attr in getattr(obj, '__add_to_dict__', [])}
+    return {attr: getattr(obj, attr) for attr in getattr(obj, "__add_to_dict__", [])}
+
+
+def sanitize_tag(input_string):
+    allowed_characters = re.compile(r"[^a-zA-Z0-9\s\._:/=+\-]")
+    sanitized_string = re.sub(allowed_characters, "", input_string)
+    return sanitized_string
+
+
+def get_environment():
+    if "prod" in ala_config.ENVIRONMENT_TYPE.lower():
+        return "production"
+    if "dev" in ala_config.ENVIRONMENT_TYPE.lower():
+        return "development"
+    if "test" in ala_config.ENVIRONMENT_TYPE.lower():
+        return "testing"
 
 
 @dataclass
 class EMRConfig:
-    """Base class for EMR configurations.
-    """
+    """Base class for EMR configurations."""
+
     name: str
     dag_id: str
+    data_resources: str
 
     # This is a list of attributes that will be added to the exported dictionary as the configuration for EMR cluster., ignoring attribs like `name` and `dag_id`
-    __add_to_dict__ = ['Name', 'ReleaseLabel', 'Configurations', 'BootstrapActions', 'Applications', 'VisibleToAllUsers', 'JobFlowRole', 'ServiceRole', 'Tags', 'LogUri', 'Instances']
+    __add_to_dict__ = [
+        "Name",
+        "ReleaseLabel",
+        "Configurations",
+        "BootstrapActions",
+        "Applications",
+        "VisibleToAllUsers",
+        "JobFlowRole",
+        "ServiceRole",
+        "Tags",
+        "LogUri",
+        "Instances",
+    ]
     ReleaseLabel: str
     Configurations: list
     BootstrapActions: list
@@ -70,18 +110,18 @@ class EMRConfig:
     VisibleToAllUsers: bool = field(default=True, init=False)
     JobFlowRole: str = field(default=ala_config.JOB_FLOW_ROLE, init=False)
     ServiceRole: str = field(default=ala_config.SERVICE_ROLE, init=False)
-    Tags: list = field(default_factory=lambda: [{
-        'Key': 'for-use-with-amazon-emr-managed-policies',
-        'Value': 'true'
-    },
-        {
-            'Key': 'pipelines',
-            'Value': 'Preingest_datasets'
-        }], init=False)
+    Tags: list = field(
+        default_factory=lambda: [
+            {"Key": "for-use-with-amazon-emr-managed-policies", "Value": "true"},
+            {"Key": "component", "Value": "ingestion"},
+            {"Key": "environment", "Value": get_environment()},
+        ],
+        init=False,
+    )
 
     @property
     def Name(self) -> str:
-        return f'{self.name} ' + ala_config.S3_BUCKET
+        return f"{self.name} [{ala_config.S3_BUCKET}]"
 
     @property
     def LogUri(self) -> str:
@@ -94,19 +134,26 @@ class EMRConfig:
     @property
     def Instances(self):
         return {
-            'InstanceGroups': self.instance_groups,
-            'KeepJobFlowAliveWhenNoSteps': False,
-            'TerminationProtected': False,
-            'Ec2KeyName': ala_config.EC2_KEY_NAME,
-            'Ec2SubnetId': ala_config.EC2_SUBNET_ID,
-            'AdditionalMasterSecurityGroups': ala_config.EC2_ADDITIONAL_MASTER_SECURITY_GROUPS,
-            'AdditionalSlaveSecurityGroups': ala_config.EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS
+            "InstanceGroups": self.instance_groups,
+            "KeepJobFlowAliveWhenNoSteps": False,
+            "TerminationProtected": False,
+            "Ec2KeyName": ala_config.EC2_KEY_NAME,
+            "Ec2SubnetId": ala_config.EC2_SUBNET_ID,
+            "AdditionalMasterSecurityGroups": ala_config.EC2_ADDITIONAL_MASTER_SECURITY_GROUPS,
+            "AdditionalSlaveSecurityGroups": ala_config.EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS,
         }
+
+    def __post_init__(self):
+        self.Tags += [
+            {"Key": "Name", "Value": sanitize_tag(self.Name)},
+            {"Key": "data-resources", "Value": sanitize_tag(self.data_resources)},
+        ]
 
 
 @dataclass
 class PreIngestionEMRConfig(EMRConfig):
-    """Configuration for EMR cluster for pre-ingestion. """
+    """Configuration for EMR cluster for pre-ingestion."""
+
     instance_type: str
     ebs_size_in_gb: int
 
@@ -116,51 +163,69 @@ class PreIngestionEMRConfig(EMRConfig):
     def instance_groups(self):
         return [
             {
-                'Name': "Master nodes",
-                'Market': ala_config.MASTER_MARKET,
-                'InstanceRole': 'MASTER',
-                'InstanceType': self.instance_type,
-                'CustomAmiId': ala_config.PREINGESTION_AMI,
-                'InstanceCount': 1,
-                'EbsConfiguration': {
-                    'EbsBlockDeviceConfigs': [
+                "Name": "Master nodes",
+                "Market": ala_config.MASTER_MARKET,
+                "InstanceRole": "MASTER",
+                "InstanceType": self.instance_type,
+                "CustomAmiId": ala_config.PREINGESTION_AMI,
+                "InstanceCount": 1,
+                "EbsConfiguration": {
+                    "EbsBlockDeviceConfigs": [
                         {
-                            'VolumeSpecification': {
-                                'SizeInGB': self.ebs_size_in_gb,
-                                'VolumeType': 'standard'
+                            "VolumeSpecification": {
+                                "SizeInGB": self.ebs_size_in_gb,
+                                "VolumeType": "standard",
                             }
                         }
                     ]
-                }
+                },
             }
         ]
-    Applications: list = field( default_factory = lambda: [], init=False)
+
+    Applications: list = field(default_factory=lambda: [], init=False)
     Configurations: list = field(default_factory=lambda: [], init=False)
-    BootstrapActions: list = field(default_factory=lambda: [{
-        "Name": "Bootstrap action",
-        "ScriptBootstrapAction": {
-            "Args": [f"{ala_config.S3_BUCKET}"],
-            "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/bootstrap-preingestion-actions.sh",
-        }
-    }], init=False)
+    BootstrapActions: list = field(
+        default_factory=lambda: [
+            {
+                "Name": "Bootstrap action",
+                "ScriptBootstrapAction": {
+                    "Args": [f"{ala_config.S3_BUCKET}"],
+                    "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/bootstrap-preingestion-actions.sh",
+                },
+            }
+        ],
+        init=False,
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.Tags += [{"Key": "product", "Value": "preingestion"}]
 
 
 @dataclass
 class PipelinesEMRConfig(EMRConfig):
-    """Base configuration for EMR cluster for pipelines. """
+    """Base configuration for EMR cluster for pipelines."""
+
     ReleaseLabel: str = field(default=ala_config.EMR_RELEASE, init=False)
-    Applications: list = field(default_factory=lambda: [
-        {'Name': 'Spark'},
-        {'Name': 'Hadoop'}], init=False)
-    Configurations: list = field(default_factory=lambda: [
-        {
-            "Classification": "spark",
-            "Properties": ala_config.SPARK_PROPERTIES}], init=False)
+    Applications: list = field(
+        default_factory=lambda: [{"Name": "Spark"}, {"Name": "Hadoop"}], init=False
+    )
+    Configurations: list = field(
+        default_factory=lambda: [
+            {"Classification": "spark", "Properties": ala_config.SPARK_PROPERTIES}
+        ],
+        init=False,
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.Tags = self.Tags + [{"Key": "product", "Value": "pipeline"}]
 
 
 @dataclass
 class PipelinesSingleEMRConfig(PipelinesEMRConfig):
-    """Configuration for EMR cluster for pipelines with a single node. """
+    """Configuration for EMR cluster for pipelines with a single node."""
+
     instance_type: str
     ebs_size_in_gb: int
 
@@ -168,29 +233,30 @@ class PipelinesSingleEMRConfig(PipelinesEMRConfig):
     def instance_groups(self):
         return [
             {
-                'Name': "Master nodes",
-                'Market': ala_config.MASTER_MARKET,
-                'InstanceRole': 'MASTER',
-                'InstanceType': self.instance_type,
-                'CustomAmiId': ala_config.PREINGESTION_AMI,
-                'InstanceCount': 1,
-                'EbsConfiguration': {
-                    'EbsBlockDeviceConfigs': [
+                "Name": "Master nodes",
+                "Market": ala_config.MASTER_MARKET,
+                "InstanceRole": "MASTER",
+                "InstanceType": self.instance_type,
+                "CustomAmiId": ala_config.PREINGESTION_AMI,
+                "InstanceCount": 1,
+                "EbsConfiguration": {
+                    "EbsBlockDeviceConfigs": [
                         {
-                            'VolumeSpecification': {
-                                'SizeInGB': self.ebs_size_in_gb,
-                                'VolumeType': 'standard'
+                            "VolumeSpecification": {
+                                "SizeInGB": self.ebs_size_in_gb,
+                                "VolumeType": "standard",
                             }
                         }
                     ]
-                }
+                },
             }
         ]
 
 
 @dataclass
 class PipelinesMultiEMRConfig(PipelinesEMRConfig):
-    """Configuration for EMR cluster for pipelines with multiple nodes. """
+    """Configuration for EMR cluster for pipelines with multiple nodes."""
+
     slave_instance_count: int
     instance_type: str
     ebs_size_in_gb: int
@@ -199,60 +265,111 @@ class PipelinesMultiEMRConfig(PipelinesEMRConfig):
     def instance_groups(self):
         return [
             {
-                'Name': "Master nodes",
-                'Market': ala_config.MASTER_MARKET,
-                'InstanceRole': 'MASTER',
-                'InstanceType': ala_config.EC2_LARGE_INSTANCE_TYPE,
-                'InstanceCount': 1,
-                'EbsConfiguration': {
-                    'EbsBlockDeviceConfigs': [
+                "Name": "Master nodes",
+                "Market": ala_config.MASTER_MARKET,
+                "InstanceRole": "MASTER",
+                "InstanceType": ala_config.EC2_LARGE_INSTANCE_TYPE,
+                "InstanceCount": 1,
+                "EbsConfiguration": {
+                    "EbsBlockDeviceConfigs": [
                         {
-                            'VolumeSpecification': {
-                                'SizeInGB': self.ebs_size_in_gb,
-                                'VolumeType': 'standard'
+                            "VolumeSpecification": {
+                                "SizeInGB": self.ebs_size_in_gb,
+                                "VolumeType": "standard",
                             }
                         }
                     ]
-                }
+                },
             },
             {
-                'Name': "Slave nodes",
-                'Market': ala_config.SLAVE_MARKET,
-                'InstanceRole': 'CORE',
-                'InstanceType': ala_config.EC2_LARGE_INSTANCE_TYPE,
-                'InstanceCount': self.slave_instance_count,
-                'EbsConfiguration': {
-                    'EbsBlockDeviceConfigs': [
+                "Name": "Slave nodes",
+                "Market": ala_config.SLAVE_MARKET,
+                "InstanceRole": "CORE",
+                "InstanceType": ala_config.EC2_LARGE_INSTANCE_TYPE,
+                "InstanceCount": self.slave_instance_count,
+                "EbsConfiguration": {
+                    "EbsBlockDeviceConfigs": [
                         {
-                            'VolumeSpecification': {
-                                'SizeInGB': self.ebs_size_in_gb,
-                                'VolumeType': 'standard'
+                            "VolumeSpecification": {
+                                "SizeInGB": self.ebs_size_in_gb,
+                                "VolumeType": "standard",
                             }
                         }
                     ]
-                }
-            }
+                },
+            },
         ]
 
 
-def get_pre_ingestion_cluster(dag_id, instance_type, name):
-    return obj_as_dict(PreIngestionEMRConfig(dag_id=dag_id, instance_type=instance_type, name=name, ebs_size_in_gb=ala_config.PREINGESTION_EBS_SIZE_IN_GB))
+def get_pre_ingestion_cluster(dag_id, instance_type, name, drs=""):
+    return obj_as_dict(
+        PreIngestionEMRConfig(
+            dag_id=dag_id,
+            instance_type=instance_type,
+            name=name,
+            ebs_size_in_gb=ala_config.PREINGESTION_EBS_SIZE_IN_GB,
+            data_resources=drs,
+        )
+    )
 
 
-def get_small_cluster(dag_id, bootstrap_actions_script, ebs_size_in_gb=ala_config.EC2_SMALL_EBS_SIZE_IN_GB):
+def get_small_cluster(
+    dag_id,
+    bootstrap_actions_script,
+    ebs_size_in_gb=ala_config.EC2_SMALL_EBS_SIZE_IN_GB,
+    drs="",
+):
     bootstrap_actions = ala_config.get_bootstrap_actions(bootstrap_actions_script)
-    return obj_as_dict(PipelinesSingleEMRConfig(dag_id=dag_id, instance_type=ala_config.EC2_SMALL_INSTANCE_TYPE, name=dag_id, ebs_size_in_gb=ebs_size_in_gb,
-                                                BootstrapActions=bootstrap_actions))
+    return obj_as_dict(
+        PipelinesSingleEMRConfig(
+            dag_id=dag_id,
+            instance_type=ala_config.EC2_SMALL_INSTANCE_TYPE,
+            name=dag_id,
+            ebs_size_in_gb=ebs_size_in_gb,
+            BootstrapActions=bootstrap_actions,
+            data_resources=drs,
+        )
+    )
 
 
-def get_medium_cluster(dag_id, bootstrap_actions_script, ebs_size_in_gb=ala_config.EC2_MEDIUM_EBS_SIZE_IN_GB, cluster_size=ala_config.EC2_MEDIUM_INSTANCE_COUNT):
+def get_medium_cluster(
+    dag_id,
+    bootstrap_actions_script,
+    ebs_size_in_gb=ala_config.EC2_MEDIUM_EBS_SIZE_IN_GB,
+    cluster_size=ala_config.EC2_MEDIUM_INSTANCE_COUNT,
+    drs="",
+):
     bootstrap_actions = ala_config.get_bootstrap_actions(bootstrap_actions_script)
 
-    return obj_as_dict(PipelinesMultiEMRConfig(dag_id=dag_id, instance_type=ala_config.EC2_LARGE_INSTANCE_TYPE, name=dag_id, ebs_size_in_gb=ebs_size_in_gb,
-                                               slave_instance_count=cluster_size, BootstrapActions=bootstrap_actions))
+    return obj_as_dict(
+        PipelinesMultiEMRConfig(
+            dag_id=dag_id,
+            instance_type=ala_config.EC2_LARGE_INSTANCE_TYPE,
+            name=dag_id,
+            ebs_size_in_gb=ebs_size_in_gb,
+            slave_instance_count=cluster_size,
+            BootstrapActions=bootstrap_actions,
+            data_resources=drs,
+        )
+    )
 
 
-def get_large_cluster(dag_id, bootstrap_actions_script, ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB, cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT):
+def get_large_cluster(
+    dag_id,
+    bootstrap_actions_script,
+    ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB,
+    cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT,
+    drs="",
+):
     bootstrap_actions = ala_config.get_bootstrap_actions(bootstrap_actions_script)
-    return obj_as_dict(PipelinesMultiEMRConfig(dag_id=dag_id, instance_type=ala_config.EC2_LARGE_INSTANCE_TYPE, name=dag_id, ebs_size_in_gb=ebs_size_in_gb,
-                                               slave_instance_count=cluster_size, BootstrapActions=bootstrap_actions))
+    return obj_as_dict(
+        PipelinesMultiEMRConfig(
+            dag_id=dag_id,
+            instance_type=ala_config.EC2_LARGE_INSTANCE_TYPE,
+            name=dag_id,
+            ebs_size_in_gb=ebs_size_in_gb,
+            slave_instance_count=cluster_size,
+            BootstrapActions=bootstrap_actions,
+            data_resources=drs,
+        )
+    )
