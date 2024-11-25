@@ -52,7 +52,7 @@
 				"python.analysis.disableSemanticOnNoPython": false,
 				"python.analysis.enableSyncServer": true,
 				"python.analysis.userFileIndexingLimit": -1,
-                "python.defaultInterpreterPath": "/home/${remoteUser}/.local/lib/python3.11/site-packages/airflow/bin/python",
+                "python.defaultInterpreterPath": "/usr/bin/python3",
 				"python.formatting.provider": "none",
 				"python.languageServer": "Pylance",
 				"python.linting.enabled": false,
@@ -87,7 +87,10 @@
 				"GitHub.copilot",
 				"mechatroner.rainbow-csv",
 				"ms-toolsai.jupyter",
+				"ms-python.pylint",
+				"ms-python.black-formatter",
 				"ms-python.debugpy",
+				"GitHub.vscode-pull-request-github",
 				"amazonwebservices.aws-toolkit-vscode"
 			]
 		}
