@@ -8,7 +8,8 @@ from urllib.parse import urlparse
 import boto3
 import requests
 import zipfile
-
+from airflow.providers.slack.notifications.slack import send_slack_notification
+from enum import StrEnum
 from ala import ala_config
 
 log: logging.log = logging.getLogger("airflow")
@@ -436,6 +437,77 @@ def get_file_name(path):
 
 
 def get_default_args():
+
+    class Status(StrEnum):
+        FAILED = "failed"
+        SUCCESS = "success"
+
+    def slack_alert(status: Status):
+        if ala_config.SLACK_NOTIFICATION:
+            if status == Status.FAILED:
+                icon = ":red_circle:"
+            else:
+                icon = ":large_green_circle:"
+            slack_alert = [
+                send_slack_notification(
+                    slack_conn_id="slack_api_conn",
+                    channel="#airflow-alerts-public",
+                    blocks=[
+                        {
+                            "type": "header",
+                            "text": {
+                                "type": "plain_text",
+                                "text": icon
+                                + "[{{ var.value.environment }}] {{ dag.dag_id }}    #{{ dag_run.id }}",
+                            },
+                        },
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "Access the DAG link here: <{{ conf.get('webserver', 'base_url') }}/dags/{{dag.dag_id}}/grid?dag_run_id={{dag_run.run_id.replace('+','%2B')}}&tab=graph|{{dag.dag_id}}>",
+                            },
+                        },
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "*{{task_instance.task_id}}* log is here: <{{task_instance.log_url}} | {{task_instance.task_id}}>",
+                            },
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": "*Execution started at :*"},
+                                {
+                                    "type": "mrkdwn",
+                                    "text": "{{macros.datetime_diff_for_humans(dag_run.start_date)}}",
+                                },
+                                {"type": "mrkdwn", "text": "*DAG run logical date:*"},
+                                {
+                                    "type": "mrkdwn",
+                                    "text": "{{ logical_date.in_timezone('Australia/Sydney') | ts }}",
+                                },
+                                {
+                                    "type": "mrkdwn",
+                                    "text": "*Start date of prior successful Dag run :*",
+                                },
+                                {
+                                    "type": "mrkdwn",
+                                    "text": "{{ prev_start_date_success.in_timezone('Australia/Sydney') | ts }}",
+                                },
+                                {"type": "mrkdwn", "text": "*params:*"},
+                                {"type": "mrkdwn", "text": "{{ params }}"},
+                            ],
+                        },
+                        {"type": "divider"},
+                    ],
+                )
+            ]
+        else:
+            slack_alert = None
+        return slack_alert
+
     return {
         "owner": "airflow",
         "depends_on_past": False,
@@ -443,6 +515,8 @@ def get_default_args():
         "email_on_failure": False,
         "email_on_retry": False,
         "retries": 0,
+        "on_failure_callback": slack_alert(Status.FAILED),
+        "on_success_callback": slack_alert(Status.SUCCESS),
     }
 
 
