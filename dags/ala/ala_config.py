@@ -5,10 +5,10 @@ from airflow.models import Variable
 ALA_API_KEY = Variable.get("ala_api_key")
 DOI_API_KEY = Variable.get("doi_api_key")
 ALA_API_URL = Variable.get("ala_api_url")
-AUTH_SCOPE = Variable.get('auth_scope')
-AUTH_CLIENT_ID = Variable.get('auth_client_id')
-AUTH_CLIENT_SECRET = Variable.get('auth_client_secret')
-AUTH_TOKEN_URL = Variable.get('ala_oidc_url')
+AUTH_SCOPE = Variable.get("auth_scope")
+AUTH_CLIENT_ID = Variable.get("auth_client_id")
+AUTH_CLIENT_SECRET = Variable.get("auth_client_secret")
+AUTH_TOKEN_URL = Variable.get("ala_oidc_url")
 USER_DETAILS_ENDPOINT = Variable.get("user_details_endpoint")
 ALERT_EMAIL = Variable.get("alert_email")
 BACKUP_LOCATION = Variable.get("s3_bucket_backup")
@@ -34,7 +34,7 @@ ENVIRONMENT_TYPE = Variable.get("environment")
 ES_ALIAS = Variable.get("es_alias")
 ES_HOSTS = Variable.get("es_hosts")
 EVENTS_URL = Variable.get("events_url")
-EXCLUDED_DATASETS = re.split(r'\s+', Variable.get("excluded_datasets", ''))
+EXCLUDED_DATASETS = re.split(r"\s+", Variable.get("excluded_datasets", ""))
 IMAGES_URL = Variable.get("images_url")
 JOB_FLOW_ROLE = Variable.get("job_flow_role")
 JOB_SCHEDULE_CONFIG = Variable.get("job_schedule_config", "")
@@ -62,6 +62,11 @@ SDS_BUCKET = Variable.get("sds_bucket")
 SDS_S3_DIRECTORY = Variable.get("sds_s3_directory")
 SERVICE_ROLE = Variable.get("service_role")
 SLAVE_MARKET = Variable.get("slave_market")
+SLACK_NOTIFICATION = Variable.get("slack_notification", "false").lower() in (
+    "true",
+    "1",
+    "t",
+)
 SOLR_COLLECTION = Variable.get("solr_collection")
 SOLR_COLLECTION_TO_KEEP = Variable.get("solr_collection_to_keep")
 SOLR_CONFIGSET = Variable.get("solr_configset")
@@ -70,8 +75,12 @@ SOLR_REPLICATION_FACTOR = Variable.get("solr_collection_rf")
 SPARK_PROPERTIES = json.loads(Variable.get("spark_properties"))
 ZK_URL = Variable.get("zk_url")
 
-EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get('ec2_additional_master_security_groups').split(',')
-EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get('ec2_additional_slave_security_groups').split(',')
+EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get(
+    "ec2_additional_master_security_groups"
+).split(",")
+EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get(
+    "ec2_additional_slave_security_groups"
+).split(",")
 
 
 def get_bootstrap_actions(bootstrap_script):
@@ -81,9 +90,9 @@ def get_bootstrap_actions(bootstrap_script):
             "ScriptBootstrapAction": {
                 "Args": [f"{S3_BUCKET}"],
                 "Path": f"s3://{S3_BUCKET}/airflow/dags/{bootstrap_script}",
-            }
+            },
         },
-        get_bootstrap_config()
+        get_bootstrap_config(),
     ]
 
 
@@ -106,8 +115,8 @@ def get_bootstrap_config():
                 f"{SOLR_COLLECTION}",  # 12
                 f"{SOLR_CONFIGSET}",  # 13
                 f"{ES_HOSTS}",  # 14
-                f"{ES_ALIAS}"  # 15
+                f"{ES_ALIAS}",  # 15
             ],
             "Path": f"s3://{S3_BUCKET}/airflow/dags/bootstrap-la-pipelines-config.sh",
-        }
+        },
     }
