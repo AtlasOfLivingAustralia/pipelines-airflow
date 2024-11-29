@@ -7,9 +7,8 @@
         {
             // for remote debugging of a DAG, please add the following code to the Task inside the DAG and put a breakpoint after the last line:
             //
-            // import debugpy
-            // debugpy.listen(('0.0.0.0', 10001))
-            // debugpy.wait_for_client()
+            // from ala.ala_helper import enable_debugpy
+            // enable_debugpy()
 
 
             "name": "Python Debugger: Remote Attach",
