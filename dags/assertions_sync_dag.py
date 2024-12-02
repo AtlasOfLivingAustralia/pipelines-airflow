@@ -81,7 +81,7 @@ def taskflow():
             print("Error encountered during request ", err)
             raise SystemExit(err)
 
-    call_api(authenticate())
+    call_api(authenticate()) >> ala_helper.get_success_notification_operator()
 
 
 dag = taskflow()
