@@ -5,6 +5,7 @@ from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 from ala import ala_config
 from dataclasses import dataclass, field
 import re
+from ala.ala_helper import get_success_notification_operator
 
 
 def run_large_emr(
@@ -50,7 +51,13 @@ def run_large_emr(
         aws_conn_id="aws_default",
     )
 
-    cluster_creator >> step_adder >> step_checker >> wait_for_termination
+    (
+        cluster_creator
+        >> step_adder
+        >> step_checker
+        >> wait_for_termination
+        >> get_success_notification_operator()
+    )
 
 
 def obj_as_dict(obj):
