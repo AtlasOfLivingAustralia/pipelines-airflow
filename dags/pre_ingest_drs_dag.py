@@ -1,7 +1,7 @@
 import logging as log
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.operators.python import BranchPythonOperator
 from airflow.exceptions import AirflowSkipException
@@ -14,7 +14,12 @@ from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
 from datetime import datetime, timedelta
 from airflow.utils.dates import days_ago
 from ala import ala_config, cluster_setup
-from ala.ala_helper import step_bash_cmd, get_dr_count, get_default_args
+from ala.ala_helper import (
+    step_bash_cmd,
+    get_dr_count,
+    get_default_args,
+    get_success_notification_operator,
+)
 
 DAG_ID = "Preingest_datasets"
 
@@ -218,11 +223,11 @@ with DAG(
         trigger_rule=TriggerRule.ALL_SUCCESS,
     )
 
-    skip_ingest = DummyOperator(
+    skip_ingest = EmptyOperator(
         task_id="skip_ingest", trigger_rule=TriggerRule.ALL_SUCCESS
     )
 
-    ingest_batch = DummyOperator(
+    ingest_batch = EmptyOperator(
         task_id="ingest_batch", trigger_rule=TriggerRule.ALL_SUCCESS
     )
 
@@ -311,7 +316,7 @@ with DAG(
                 },
             )
 
-        check_ingest_batches = DummyOperator(
+        check_ingest_batches = EmptyOperator(
             task_id="check_ingest_batches",
             trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
         )
@@ -338,3 +343,4 @@ with DAG(
     skip_ingest >> delete_run_id
     ingest_datasets >> delete_run_id
     ingest_batch >> ingest_batch_task_grp >> delete_run_id
+    delete_run_id >> get_success_notification_operator()
