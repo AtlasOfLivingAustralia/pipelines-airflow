@@ -67,6 +67,7 @@ SLACK_NOTIFICATION = Variable.get("slack_notification", "false").lower() in (
     "1",
     "t",
 )
+SLACK_ALERTS_CHANNEL = Variable.get("slack_alerts_channel")
 SOLR_COLLECTION = Variable.get("solr_collection")
 SOLR_COLLECTION_TO_KEEP = Variable.get("solr_collection_to_keep")
 SOLR_CONFIGSET = Variable.get("solr_configset")
