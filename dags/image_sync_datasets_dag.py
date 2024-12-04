@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.utils.dates import days_ago
 from datetime import timedelta
 from ala.ala_helper import get_image_sync_steps, get_default_args
-from ala import ala_config, ala_helper, cluster_setup
+from ala import ala_config, cluster_setup
 
 DAG_ID = 'Image_sync_datasets'
 

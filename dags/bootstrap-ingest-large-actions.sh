@@ -5,6 +5,7 @@ echo "S3 bucket to use: $S3_BUCKET"
 
 sudo pip3 install -U FrictionlessDarwinCore
 
+yum install -y unzip
 # set up name service
 #sudo yum install -y docker
 #sudo systemctl start docker
