@@ -3,15 +3,16 @@ import json
 import logging
 import os
 import re
+import zipfile
 from datetime import date, datetime, timedelta
+from enum import StrEnum
 from urllib.parse import urlparse
+
 import boto3
 import requests
-import zipfile
+from airflow.operators.empty import EmptyOperator
 from airflow.providers.slack.notifications.slack import send_slack_notification
 from airflow.providers.slack.operators.slack import SlackAPIPostOperator
-from airflow.operators.empty import EmptyOperator
-from enum import StrEnum
 from ala import ala_config
 
 log: logging.log = logging.getLogger("airflow")
@@ -502,7 +503,7 @@ def get_slack_blocks(status):
                 },
                 {
                     "type": "mrkdwn",
-                    "text": "{{ prev_start_date_success.in_timezone('Australia/Sydney') | ts }}",
+                    "text": "{{ prev_start_date_success.in_timezone('Australia/Sydney') | ts if prev_start_date_success is not none else 'No previous start date available' }}",
                 },
                 {"type": "mrkdwn", "text": "*params:*"},
                 {"type": "mrkdwn", "text": "{{ params }}"},
