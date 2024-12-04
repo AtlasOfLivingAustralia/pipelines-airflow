@@ -9,8 +9,6 @@
             //
             // from ala.ala_helper import enable_debugpy
             // enable_debugpy()
-
-
             "name": "Python Debugger: Remote Attach",
             "type": "debugpy",
             "request": "attach",
@@ -23,6 +21,28 @@
                     "localRoot": "${workspaceFolder}",
                     "remoteRoot": "."
                 }
+            ]
+        },
+        {
+            "name": "Python: Update Collection Alias",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/dags/update_collection_alias_cli.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--solr_base",
+                "http://localhost:8983/solr",
+                "--new_collection",
+                "biocache",
+                "--collection_to_keep",
+                "biocache",
+                "--solr_alias",
+                "biocache",
+                "--old_collection",
+                "biocache",
+                "--run_checks_only",
+                "true",
+                "auto_all"
             ]
         }
     ]
