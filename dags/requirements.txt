@@ -1,4 +1,4 @@
---constraint "./constraints-3.11-updated.txt"
+--constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.1/constraints-3.11.txt"
 pydantic==2.8.2
 urllib3==2.2.2
 requests==2.32.3
