@@ -1,4 +1,5 @@
 .idea/
+.cache/
 .DS_Store
 **/__pycache__
 /pyvenv.cfg
@@ -7,3 +8,7 @@
 *.iml
 /logs
 /airflow.cfg
+.bash_aliases
+.gitconfig
+airflow-webserver.pid
+webserver_config.py

@@ -16,17 +16,16 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [8765],
 	"mounts": [
-		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/${remoteUser}/.cache,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/${remoteUser}/.command-history,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.devcontainer,target=/opt/airflow/.devcontainer,type=bind,consistency=cached",
-		"source=~/.ssh,target=/home/airflow/.ssh,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached"
+		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/opt/airflow/.cache,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/opt/airflow/.command-history,type=bind,consistency=cached",
+		"source=~/.ssh,target=/opt/airflow/.ssh,type=bind,consistency=cached",
+		"source=~/.aws,target=/opt/airflow/.aws,type=bind,consistency=cached"
 		],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"containerEnv": {
 		"PROMPT_COMMAND": "history -a",
-		"HISTFILE": "/home/${remoteUser}/.command-history/.bash_hist"
+		"HISTFILE": "/opt/airflow/.command-history/.bash_hist"
 	},
 
 	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-1.ala",

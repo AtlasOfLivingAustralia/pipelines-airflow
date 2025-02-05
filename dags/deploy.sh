@@ -1,4 +1,4 @@
-BUCKET=s3://airflow-bucket
+BUCKET=s3://ala-databox-dev
 LOCAL_DAG_DIR=./dags
 today=$(date +%Y_%m_%d_%H_%M_%S)
 aws s3 mv $BUCKET/airflow/dags $BUCKET/airflow/dags-$today --recursive
