@@ -134,6 +134,7 @@ services:
     restart: always
     environment:
       <<: *airflow-common-env
+      AIRFLOW__LOGGING__LOGGING_LEVEL: DEBUG
 
     user: "airflow"
       
