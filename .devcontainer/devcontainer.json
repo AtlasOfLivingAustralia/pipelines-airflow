@@ -12,6 +12,7 @@
 	// "features": {},
 
 	// add a port forwarding for solr to hosts localhost
+	
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [8765],
@@ -20,16 +21,17 @@
 		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/${remoteUser}/.command-history,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.devcontainer,target=/opt/airflow/.devcontainer,type=bind,consistency=cached",
 		"source=~/.ssh,target=/home/airflow/.ssh,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached"
+		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.devcontainer/.bash_aliases,target=/home/airflow/.bash_aliases,type=bind,consistency=cached"
 		],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"containerEnv": {
 		"PROMPT_COMMAND": "history -a",
-		"HISTFILE": "/home/${remoteUser}/.command-history/.bash_hist"
+		"HISTFILE": "/home/airflow/.command-history/.bash_hist"
 	},
 
-	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-1.ala",
+	"postCreateCommand": "ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-1.ala",
 
 	// Configure tool-specific properties.
 	"customizations": {
