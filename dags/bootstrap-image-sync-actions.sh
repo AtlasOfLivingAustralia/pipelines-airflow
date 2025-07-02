@@ -5,7 +5,7 @@ echo 'S3 bucket to use: $S3_BUCKET'
 
 # create directories
 sudo mkdir -p /data/la-pipelines/config
-sudo chown hadoop:hadoop -R /data/la-pipelines/*
+#sudo chown hadoop:hadoop -R /data/la-pipelines/*
 
 # config files and JAR
 sudo aws s3 cp s3://$S3_BUCKET/logback.xml  /data/la-pipelines/config
