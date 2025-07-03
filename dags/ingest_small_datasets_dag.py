@@ -20,7 +20,7 @@ DAG_ID = 'Ingest_small_datasets'
 
 def get_dwca_steps(dataset_list):
     return [
-        step_bash_cmd("a. Download data", f" /tmp/download-datasets.sh {ala_config.S3_BUCKET_DWCA} {ala_config.S3_BUCKET_AVRO}  {dataset_list}"),
+        step_bash_cmd("a. Download data", f" /tmp/download-datasets.sh {ala_config.S3_BUCKET_DWCA} {ala_config.S3_BUCKET_AVRO} {ala_config.EMR_JAVA_HOME} {dataset_list}"),
         step_bash_cmd("b. DwCA to Verbatim", f" la-pipelines dwca-avro {dataset_list}")
     ]
 
