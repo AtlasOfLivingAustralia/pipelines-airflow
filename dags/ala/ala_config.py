@@ -71,6 +71,9 @@ KEEP_EMR_ALIVE = Variable.get("keep_emr_alive_after_finish", "false").lower() in
     "t",
 )
 
+# if not set this will be java 8 by default (emr defaults to java 8)
+EMR_JAVA_HOME = Variable.get("emr_java_home", "")
+
 
 def get_bootstrap_actions(bootstrap_script):
     return [

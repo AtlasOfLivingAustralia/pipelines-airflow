@@ -2,11 +2,19 @@
 set -x
 s3_bucket_dwca=$1
 s3_bucket_avro=$2
+emr_java_home=$3
 
 sudo chown hadoop:hadoop -R /mnt/dwca-tmp
 sudo chown hadoop:hadoop -R /data/*
 
-for ((i = 3; i <= $#; i++ )); do
+#export JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto.aarch64/bin/java
+if [ -n "$emr_java_home" ]
+then
+  sudo alternatives --set java $emr_java_home
+fi
+
+
+for ((i = 4; i <= $#; i++ )); do
 
   export datasetId=${!i}
   echo 'Download ' $datasetId
