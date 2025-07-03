@@ -17,25 +17,25 @@ def run_large_emr(dag, spark_steps, bootstrap_script, ebs_size_in_gb=ala_config.
 
     step_adder = EmrAddStepsOperator(
         dag=dag,
-        task_id='add_steps',
+        task_id="add_steps",
         job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_cluster', key='return_value') }}",
-        aws_conn_id='aws_default',
+        aws_conn_id="aws_default",
         steps=spark_steps
     )
 
     step_checker = EmrStepSensor(
         dag=dag,
-        task_id='watch_step',
+        task_id="watch_step",
         job_flow_id="{{ task_instance.xcom_pull('create_emr_cluster', key='return_value') }}",
         step_id="{{ task_instance.xcom_pull(task_ids='add_steps', key='return_value')[0] }}",
-        aws_conn_id='aws_default'
+        aws_conn_id="aws_default"
     )
 
     wait_for_termination = EmrJobFlowSensor(
         dag=dag,
-        task_id='wait_for_cluster_termination',
+        task_id="wait_for_cluster_termination",
         job_flow_id="{{ task_instance.xcom_pull('create_emr_cluster', key='return_value') }}",
-        aws_conn_id='aws_default'
+        aws_conn_id="aws_default"
     )
 
     cluster_creator >> step_adder >> step_checker >> wait_for_termination
@@ -49,7 +49,7 @@ def obj_as_dict(obj):
     :type obj: object
     :return: dictionary with the attributes of obj that are in the
         __add_to_dict__ list
-    
+
     """
     return {attr: getattr(obj, attr) for attr in getattr(obj, '__add_to_dict__', [])}
 
@@ -94,13 +94,13 @@ class EMRConfig:
     @property
     def Instances(self):
         return {
-            'InstanceGroups': self.instance_groups,
-            'KeepJobFlowAliveWhenNoSteps': False,
-            'TerminationProtected': False,
-            'Ec2KeyName': ala_config.EC2_KEY_NAME,
-            'Ec2SubnetId': ala_config.EC2_SUBNET_ID,
-            'AdditionalMasterSecurityGroups': ala_config.EC2_ADDITIONAL_MASTER_SECURITY_GROUPS,
-            'AdditionalSlaveSecurityGroups': ala_config.EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS
+            "InstanceGroups": self.instance_groups,
+            "KeepJobFlowAliveWhenNoSteps": ala_config.KEEP_EMR_ALIVE,
+            "TerminationProtected": ala_config.KEEP_EMR_ALIVE,
+            "Ec2KeyName": ala_config.EC2_KEY_NAME,
+            "Ec2SubnetId": ala_config.EC2_SUBNET_ID,
+            "AdditionalMasterSecurityGroups": ala_config.EC2_ADDITIONAL_MASTER_SECURITY_GROUPS,
+            "AdditionalSlaveSecurityGroups": ala_config.EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS,
         }
 
 

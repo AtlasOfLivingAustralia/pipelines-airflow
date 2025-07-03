@@ -65,6 +65,11 @@ ZK_URL = Variable.get("zk_url")
 
 EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get('ec2_additional_master_security_groups').split(',')
 EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get('ec2_additional_slave_security_groups').split(',')
+KEEP_EMR_ALIVE = Variable.get("keep_emr_alive_after_finish", "false").lower() in (
+    "true",
+    "1",
+    "t",
+)
 
 
 def get_bootstrap_actions(bootstrap_script):
