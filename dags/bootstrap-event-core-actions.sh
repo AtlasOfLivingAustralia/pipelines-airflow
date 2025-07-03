@@ -15,8 +15,8 @@ sudo mkdir -p /data/pipelines-vocabularies
 sudo mkdir -p /data/dwca-tmp/
 sudo chmod -R 777 /data/dwca-tmp/
 sudo mkdir -p /data/spark-tmp
-sudo chown hadoop:hadoop -R /mnt/dwca-tmp
-sudo chown hadoop:hadoop -R /data/*
+#sudo chown hadoop:hadoop -R /mnt/dwca-tmp
+#sudo chown hadoop:hadoop -R /data/*
 
 # get SHP files
 sudo aws s3 cp s3://$S3_BUCKET/pipelines-shp/ /data/pipelines-shp/ --recursive --include "*"

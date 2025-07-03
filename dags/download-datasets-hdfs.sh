@@ -3,6 +3,9 @@ set -x
 s3_bucket_dwca=$1
 s3_bucket_avro=$2
 
+sudo chown hadoop:hadoop -R /mnt/dwca-tmp
+sudo chown hadoop:hadoop -R /data/*
+
 for ((i = 3; i <= $#; i++ )); do
 
   export datasetId=${!i}

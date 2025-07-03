@@ -142,8 +142,8 @@ class EMRConfig:
     def Instances(self):
         return {
             "InstanceGroups": self.instance_groups,
-            "KeepJobFlowAliveWhenNoSteps": False,
-            "TerminationProtected": False,
+            "KeepJobFlowAliveWhenNoSteps": ala_config.KEEP_EMR_ALIVE,
+            "TerminationProtected": ala_config.KEEP_EMR_ALIVE,
             "Ec2KeyName": ala_config.EC2_KEY_NAME,
             "Ec2SubnetId": ala_config.EC2_SUBNET_ID,
             "AdditionalMasterSecurityGroups": ala_config.EC2_ADDITIONAL_MASTER_SECURITY_GROUPS,
@@ -244,7 +244,6 @@ class PipelinesSingleEMRConfig(PipelinesEMRConfig):
                 "Market": ala_config.MASTER_MARKET,
                 "InstanceRole": "MASTER",
                 "InstanceType": self.instance_type,
-                "CustomAmiId": ala_config.PREINGESTION_AMI,
                 "InstanceCount": 1,
                 "EbsConfiguration": {
                     "EbsBlockDeviceConfigs": [

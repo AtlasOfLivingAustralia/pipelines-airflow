@@ -18,8 +18,8 @@ sudo mkdir -p /data/pipelines-vocabularies
 sudo mkdir -p /data/dwca-tmp/
 sudo chmod -R 777 /data/dwca-tmp/
 sudo mkdir -p /data/spark-tmp
-sudo chown hadoop:hadoop -R /mnt/dwca-tmp
-sudo chown hadoop:hadoop -R /data/*
+#sudo chown hadoop:hadoop -R /mnt/dwca-tmp
+#sudo chown hadoop:hadoop -R /data/*
 
 # config files and JAR
 sudo aws s3 cp s3://$S3_BUCKET/logback.xml  /data/la-pipelines/config
