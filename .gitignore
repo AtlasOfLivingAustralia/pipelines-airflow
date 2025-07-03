@@ -8,7 +8,4 @@
 *.iml
 /logs
 /airflow.cfg
-.bash_aliases
-.gitconfig
-airflow-webserver.pid
 webserver_config.py

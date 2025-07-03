@@ -50,9 +50,10 @@ x-airflow-common:
   # In order to add custom dependencies or upgrade provider packages you can use your extended image.
   # Comment the image line, place your Dockerfile in the directory where you placed the docker-compose.yaml
   # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
-  # image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.10.1}
-  build: .
-  environment:
+  build:
+    context: ..
+    dockerfile: .devcontainer/Dockerfile
+  environment: 
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -125,7 +126,7 @@ services:
     <<: *airflow-common
     command: webserver
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
@@ -142,7 +143,7 @@ services:
     <<: *airflow-common
     command:    [
         "bash", 
-        "-c", " pip install -U -r /opt/airflow/dags/requirements-dev-scheduler.txt && airflow scheduler"
+        "-c", "pip install -U -r /opt/airflow/dags/requirements-dev-scheduler.txt && airflow scheduler"
       ]    
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
