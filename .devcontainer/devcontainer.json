@@ -1,7 +1,7 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
-	"name": "Airflow 2.10.1",
+	"name": "Airflow 2.10.5 py-3.11",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
     "dockerComposeFile": [
 		"./docker-compose.yaml"
@@ -30,7 +30,7 @@
 		"HISTFILE": "/opt/airflow/.command-history/.bash_hist"
 	},
 
-	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-1.ala",
+	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-frost-1.ala",
 
 	// Configure tool-specific properties.
 	"customizations": {
