@@ -2,6 +2,7 @@ from datetime import timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.utils.task_group import TaskGroup
 from airflow.utils.dates import days_ago
 from airflow.utils.trigger_rule import TriggerRule
 import update_collection_alias_cli as ucli
@@ -75,73 +76,49 @@ with DAG(
         return ret
 
     def check_min_fields_for_random_records(**kwargs):
-        return check_function(
-            "check_min_fields_for_random_records",
-            ucli.check_min_fields_for_random_records,
-            **kwargs,
-        )
+        return check_function("check_min_fields_for_random_records", ucli.check_min_fields_for_random_records, **kwargs)
 
     def check_compare_random_records(**kwargs):
-        return check_function(
-            "check_compare_random_records", ucli.check_compare_random_records, **kwargs
-        )
+        return check_function("check_compare_random_records", ucli.check_compare_random_records, **kwargs)
 
     def check_total_count(**kwargs):
         return check_function("check_total_count", ucli.check_total_count, **kwargs)
 
     def check_data_resources(**kwargs):
-        return check_function(
-            "check_data_resources", ucli.check_data_resources, **kwargs
-        )
+        return check_function("check_data_resources", ucli.check_data_resources, **kwargs)
 
     def check_sensitivity(**kwargs):
         return check_function("check_sensitivity", ucli.check_sensitivity, **kwargs)
 
     def check_species_list_uid(**kwargs):
-        return check_function(
-            "check_species_list_uid", ucli.check_species_list_uid, **kwargs
-        )
+        return check_function("check_species_list_uid", ucli.check_species_list_uid, **kwargs)
 
     def check_conservation_status(**kwargs):
-        return check_function(
-            "check_conservation_status", ucli.check_conservation_status, **kwargs
-        )
+        return check_function("check_conservation_status", ucli.check_conservation_status, **kwargs)
 
     def check_spatial_layer_country(**kwargs):
-        return check_function(
-            "check_spatial_layer_country", ucli.check_spatial_layer_country, **kwargs
-        )
+        return check_function("check_spatial_layer_country", ucli.check_spatial_layer_country, **kwargs)
 
     def check_spatial_layer_state(**kwargs):
-        return check_function(
-            "check_spatial_layer_state", ucli.check_spatial_layer_state, **kwargs
-        )
+        return check_function("check_spatial_layer_state", ucli.check_spatial_layer_state, **kwargs)
 
     # Local government
 
     def check_spatial_layer_cl959(**kwargs):
-        return check_function(
-            "check_spatial_layer_cl959", ucli.check_spatial_layer_cl959, **kwargs
-        )
+        return check_function("check_spatial_layer_cl959", ucli.check_spatial_layer_cl959, **kwargs)
 
     # IBRA 7 region
 
     def check_spatial_layer_cl1048(**kwargs):
-        return check_function(
-            "check_spatial_layer_cl1048", ucli.check_spatial_layer_cl1048, **kwargs
-        )
+        return check_function("check_spatial_layer_cl1048", ucli.check_spatial_layer_cl1048, **kwargs)
 
     # IMCRA Meso-scale Bioregions
     def check_spatial_layer_cl966(**kwargs):
-        return check_function(
-            "check_spatial_layer_cl966", ucli.check_spatial_layer_cl966, **kwargs
-        )
+        return check_function("check_spatial_layer_cl966", ucli.check_spatial_layer_cl966, **kwargs)
 
     # IMCRA 4 Regions
     def check_spatial_layer_cl21(**kwargs):
-        return check_function(
-            "check_spatial_layer_cl21", ucli.check_spatial_layer_cl21, **kwargs
-        )
+        return check_function("check_spatial_layer_cl21", ucli.check_spatial_layer_cl21, **kwargs)
 
     def switch_collection_alias(**kwargs):
         ti = kwargs["ti"]
@@ -168,27 +145,29 @@ with DAG(
             )
             ret = ucli.ResultStatus.SKIP
         else:
-            if (
-                ti.xcom_pull(task_ids="switch_collection_alias")
-                != ucli.ResultStatus.PASS
-            ):
-                print(
-                    f"INFO- Removing old collections is skipped as the switch_collection_alias failed/skipped"
-                )
+            if ti.xcom_pull(task_ids="switch_collection_alias") != ucli.ResultStatus.PASS:
+                print(f"INFO- Removing old collections is skipped as the switch_collection_alias failed/skipped")
                 ret = ucli.ResultStatus.SKIP
             else:
                 ret = ucli.remove_old_collections(**params)
         return ret
 
+    def get_current_asserted_records(**kwargs):
+        ti = kwargs["ti"]
+        records_with_assertions_count = ala_helper.get_assertion_records_count()
+        logging.info(f"Current asserted records count: {records_with_assertions_count}")
+        ti.xcom_push(key="records_with_assertions_count", value=records_with_assertions_count)
+        return records_with_assertions_count
+
+    current_asserted_records_task = PythonOperator(
+        task_id="current_asserted_records_task", python_callable=get_current_asserted_records, provide_context=True
+    )
+
     switch_collection_alias_op = PythonOperator(
-        task_id="switch_collection_alias",
-        python_callable=switch_collection_alias,
-        provide_context=True,
+        task_id="switch_collection_alias", python_callable=switch_collection_alias, provide_context=True
     )
     remove_old_collections_op = PythonOperator(
-        task_id="remove_old_collections",
-        python_callable=remove_old_collections,
-        provide_context=True,
+        task_id="remove_old_collections", python_callable=remove_old_collections, provide_context=True
     )
 
     assertion_sync_task = TriggerDagRunOperator(
@@ -196,6 +175,7 @@ with DAG(
         trigger_dag_id="Assertions-Sync",
         wait_for_completion=True,
         trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
+        conf={"pre_sync_count": "{{ task_instance.xcom_pull(task_ids='current_asserted_records_task') }}"},
     )
 
     update_gbif_task = TriggerDagRunOperator(
@@ -212,19 +192,11 @@ with DAG(
         op_args=[ala_config.DASHBOARD_CACHE_CLEAR_URL],
     )
 
-    for check in checks_available:
-        (
-            PythonOperator(
-                task_id=check,
-                python_callable=locals()[check],
-                provide_context=True,
-            )
-            >> switch_collection_alias_op
-        )
+    with TaskGroup(group_id="index_checks") as index_checks_task_grp:
+        for check in checks_available:
+            (PythonOperator(task_id=check, python_callable=locals()[check], provide_context=True))
+    current_asserted_records_task >> index_checks_task_grp >> switch_collection_alias_op
     switch_collection_alias_op >> remove_old_collections_op
     remove_old_collections_op >> assertion_sync_task >> clear_dashboards_task
     remove_old_collections_op >> update_gbif_task
-    [
-        update_gbif_task,
-        clear_dashboards_task,
-    ] >> ala_helper.get_success_notification_operator()
+    [update_gbif_task, clear_dashboards_task] >> ala_helper.get_success_notification_operator()

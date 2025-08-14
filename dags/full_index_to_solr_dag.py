@@ -3,6 +3,7 @@
 # This will recreate the full index and swap the SOLR alias on successful completion.
 # It will also remove old collections.
 #
+import json
 from airflow import DAG
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.python import PythonOperator
@@ -19,6 +20,8 @@ from airflow.utils.trigger_rule import TriggerRule
 from distutils.util import strtobool
 from datetime import date, timedelta, datetime
 import logging
+
+import requests
 from ala import ala_config, ala_helper, cluster_setup
 from ala.ala_helper import (
     step_bash_cmd,
@@ -26,22 +29,16 @@ from ala.ala_helper import (
     emr_python_step,
     get_default_args,
     call_url,
+    get_assertion_records_count,
 )
 
 DAG_ID = "Full_index_to_solr"
 
-solrCollectionName = f"{ala_config.SOLR_COLLECTION}-" + datetime.now().strftime(
-    "%Y-%m-%d-%H-%M"
-)
+solrCollectionName = f"{ala_config.SOLR_COLLECTION}-" + datetime.now().strftime("%Y-%m-%d-%H-%M")
 
 
 def get_spark_steps(
-    solr_collection_name,
-    include_sampling,
-    include_jack_knife,
-    include_clustering,
-    include_outlier,
-    num_partitions,
+    solr_collection_name, include_sampling, include_jack_knife, include_clustering, include_outlier, num_partitions
 ):
 
     return [
@@ -61,9 +58,7 @@ def get_spark_steps(
             f"hdfs:///pipelines-all-datasets",
         ),
         step_bash_cmd("d. Sampling pipeline", f" la-pipelines sample all --cluster"),
-        step_bash_cmd(
-            "e. JackKnife pipeline", f" la-pipelines jackknife all --cluster"
-        ),
+        step_bash_cmd("e. JackKnife pipeline", f" la-pipelines jackknife all --cluster"),
         step_bash_cmd("f. Clustering", f" la-pipelines clustering all --cluster"),
         s3_cp(
             "g. Copy Outlier from S3",
@@ -77,9 +72,7 @@ def get_spark_steps(
             "hdfs:///pipelines-annotations/",
             action_on_failure="CONTINUE",
         ),
-        step_bash_cmd(
-            "h. Outlier distribution", f" la-pipelines outlier all --cluster"
-        ),
+        step_bash_cmd("h. Outlier distribution", f" la-pipelines outlier all --cluster"),
         step_bash_cmd(
             "i. SOLR indexing",
             f' la-pipelines solr all --cluster --extra-args="numOfPartitions={num_partitions},solrCollection={solr_collection_name},includeSampling={include_sampling},includeJackKnife={include_jack_knife},includeClustering={include_clustering},includeOutlier={include_outlier}"',
@@ -147,9 +140,7 @@ with DAG(
     },
 ) as dag:
 
-    new_collection = (
-        f'{ala_config.SOLR_COLLECTION}-{datetime.now().strftime("%Y-%m-%d-%H-%M")}'
-    )
+    new_collection = f'{ala_config.SOLR_COLLECTION}-{datetime.now().strftime("%Y-%m-%d-%H-%M")}'
 
     def check_image_sync_flag(**kwargs):
         skip_image_sync = strtobool(kwargs["dag_run"].conf["skipImageSync"])
@@ -159,10 +150,7 @@ with DAG(
         return "full_index_to_solr"
 
     check_image_sync_flag = BranchPythonOperator(
-        task_id="check_image_sync_flag",
-        provide_context=True,
-        python_callable=check_image_sync_flag,
-        do_xcom_push=False,
+        task_id="check_image_sync_flag", provide_context=True, python_callable=check_image_sync_flag, do_xcom_push=False
     )
 
     def get_drs_for_image_sync_index(**kwargs):
@@ -171,33 +159,21 @@ with DAG(
             "Getting the list of DRS from image-service that have new images uploaded since last successful index."
         )
         logging.info(f"Time range: {kwargs['dag_run'].conf['time_range']}")
-        time_range = (
-            None
-            if "time_range" not in kwargs["dag_run"].conf
-            else list(kwargs["dag_run"].conf["time_range"])
-        )
+        time_range = None if "time_range" not in kwargs["dag_run"].conf else list(kwargs["dag_run"].conf["time_range"])
         if time_range and (time_range[0] or time_range[1]):
-            logging.info(
-                f"Using time range for image sync from: {time_range[0]} to {time_range[1]}"
-            )
-            drs_to_be_image_synced = ala_helper.list_drs_ingested_since(
-                bucket=bucket, time_range=time_range
-            )
+            logging.info(f"Using time range for image sync from: {time_range[0]} to {time_range[1]}")
+            drs_to_be_image_synced = ala_helper.list_drs_ingested_since(bucket=bucket, time_range=time_range)
         else:
             logging.info(
                 f"No time ranges specified and going to get the list of DRs from image-service that have new images"
                 f" uploaded since last successful index."
             )
             index_date = ala_helper.read_solr_collection_date()
-            one_week_before_index_date = (
-                date.fromisoformat(index_date) - timedelta(days=7)
-            ).isoformat()
+            one_week_before_index_date = (date.fromisoformat(index_date) - timedelta(days=7)).isoformat()
             logging.info(
                 f"Last successful solr collection date: {index_date}. Getting image service uploaded date: {one_week_before_index_date}"
             )
-            images_drs_info = ala_helper.get_recent_images_drs(
-                one_week_before_index_date
-            )
+            images_drs_info = ala_helper.get_recent_images_drs(one_week_before_index_date)
             logging.info(
                 f"Found {len(images_drs_info)} DRs with new images uploaded since {one_week_before_index_date}. "
                 f"Drs: {images_drs_info}"
@@ -208,22 +184,16 @@ with DAG(
             logging.info(
                 f"Found {len(avro_drs)} DRs ingested since since {one_week_before_index_date}. Drs: {avro_drs}"
             )
-            drs_to_be_image_synced = set(images_drs_info.keys()).intersection(
-                set(avro_drs.keys())
-            )
+            drs_to_be_image_synced = set(images_drs_info.keys()).intersection(set(avro_drs.keys()))
             if not drs_to_be_image_synced:
                 logging.warning("No DRs found for image sync")
             else:
-                logging.info(
-                    f"{len(drs_to_be_image_synced)} DRs need image synchronisation: {drs_to_be_image_synced}"
-                )
+                logging.info(f"{len(drs_to_be_image_synced)} DRs need image synchronisation: {drs_to_be_image_synced}")
 
         return " ".join(drs_to_be_image_synced)
 
     get_drs_for_image_sync_index = PythonOperator(
-        task_id="get_drs_for_image_sync_index",
-        python_callable=get_drs_for_image_sync_index,
-        provide_context=True,
+        task_id="get_drs_for_image_sync_index", python_callable=get_drs_for_image_sync_index, provide_context=True
     )
 
     def check_image_sync_count(**kwargs):
@@ -234,15 +204,18 @@ with DAG(
             return "full_index_to_solr"
         dataset_list = datasets.split()
         if len(dataset_list) > ala_config.MIN_DRS_PER_BATCH:
-            logging.info(
-                f"Found {len(dataset_list)} datasets for image sync, processing in batches"
-            )
+            logging.info(f"Found {len(dataset_list)} datasets for image sync, processing in batches")
             return "image_sync_batch"
         else:
-            logging.info(
-                f"Found {len(dataset_list)} datasets for image sync, performing full index to Solr"
-            )
+            logging.info(f"Found {len(dataset_list)} datasets for image sync, performing full index to Solr")
             return "full_index_to_solr"
+
+    def get_current_asserted_records(**kwargs):
+        ti = kwargs["ti"]
+        records_with_assertions_count = get_assertion_records_count()
+        logging.info(f"Current asserted records count: {records_with_assertions_count}")
+        ti.xcom_push(key="current_asserted_records", value=records_with_assertions_count)
+        return records_with_assertions_count
 
     # Check trigger rule explanation: #https://marclamberti.com/blog/airflow-trigger-rules-all-you-need-to-know/
     check_image_sync_count = BranchPythonOperator(
@@ -253,17 +226,11 @@ with DAG(
         trigger_rule=TriggerRule.ALL_SUCCESS,
     )
 
-    image_sync = EmptyOperator(
-        task_id="image_sync", trigger_rule=TriggerRule.NONE_FAILED
-    )
+    image_sync = EmptyOperator(task_id="image_sync", trigger_rule=TriggerRule.NONE_FAILED)
 
-    image_sync_batch = EmptyOperator(
-        task_id="image_sync_batch", trigger_rule=TriggerRule.ALL_SUCCESS
-    )
+    image_sync_batch = EmptyOperator(task_id="image_sync_batch", trigger_rule=TriggerRule.ALL_SUCCESS)
 
-    full_index_to_solr = EmptyOperator(
-        task_id="full_index_to_solr", trigger_rule=TriggerRule.NONE_FAILED
-    )
+    full_index_to_solr = EmptyOperator(task_id="full_index_to_solr", trigger_rule=TriggerRule.NONE_FAILED)
 
     with TaskGroup(group_id="image_sync_batch_task_grp") as image_sync_batch_task_grp:
 
@@ -275,17 +242,14 @@ with DAG(
             import math
 
             no_of_dataset_batches = min(
-                math.ceil(len(dataset_list) / ala_config.MIN_DRS_PER_BATCH),
-                ala_config.NO_OF_DATASET_BATCHES,
+                math.ceil(len(dataset_list) / ala_config.MIN_DRS_PER_BATCH), ala_config.NO_OF_DATASET_BATCHES
             )
             for idx, dataset in enumerate(dataset_list):
                 batch = idx % no_of_dataset_batches
                 dataset_batches[batch] = dataset + " " + dataset_batches[batch]
 
             for batch_no in range(ala_config.NO_OF_DATASET_BATCHES):
-                kwargs["ti"].xcom_push(
-                    key=f"batch{str(batch_no)}", value=dataset_batches[batch_no]
-                )
+                kwargs["ti"].xcom_push(key=f"batch{str(batch_no)}", value=dataset_batches[batch_no])
 
         create_batches = PythonOperator(
             task_id="create_batches",
@@ -311,21 +275,15 @@ with DAG(
             )
 
         check_image_sync_batches = EmptyOperator(
-            task_id="check_image_sync_batches",
-            trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
+            task_id="check_image_sync_batches", trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
         )
         (
             create_batches
-            >> [
-                generate_task(batch)
-                for batch in range(ala_config.NO_OF_DATASET_BATCHES)
-            ]
+            >> [generate_task(batch) for batch in range(ala_config.NO_OF_DATASET_BATCHES)]
             >> check_image_sync_batches
         )
 
-    with TaskGroup(
-        group_id="full_index_to_solr_task_grp"
-    ) as full_index_to_solr_task_grp:
+    with TaskGroup(group_id="full_index_to_solr_task_grp") as full_index_to_solr_task_grp:
 
         def construct_full_index_steps(**kwargs):
             skip_image_sync = strtobool(kwargs["dag_run"].conf["skipImageSync"])
@@ -387,9 +345,7 @@ with DAG(
             dag=dag,
             task_id="create_emr_cluster",
             emr_conn_id="emr_default",
-            job_flow_overrides=cluster_setup.get_large_cluster(
-                DAG_ID, "bootstrap-index-actions.sh"
-            ),
+            job_flow_overrides=cluster_setup.get_large_cluster(DAG_ID, "bootstrap-index-actions.sh"),
             aws_conn_id="aws_default",
         )
 
@@ -425,12 +381,16 @@ with DAG(
             >> wait_for_termination
         )
 
+    asserted_records_count_task = PythonOperator(
+        task_id="asserted_records_count", python_callable=get_current_asserted_records, provide_context=True
+    )
+
     assertion_sync = TriggerDagRunOperator(
         task_id="assertion_sync",
         trigger_dag_id="Assertions-Sync",
         trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
         wait_for_completion=True,
-        conf={},
+        conf={"pre_sync_count": "{{ task_instance.xcom_pull(task_ids='asserted_records_count') }}"},
     )
 
     update_gbif_task = TriggerDagRunOperator(
@@ -445,18 +405,10 @@ with DAG(
         python_callable=ala_helper.call_url,
         op_kwargs={"url": ala_config.DASHBOARD_CACHE_CLEAR_URL},
     )
-    check_image_sync_flag >> [image_sync, full_index_to_solr]
-    (
-        image_sync
-        >> get_drs_for_image_sync_index
-        >> check_image_sync_count
-        >> [full_index_to_solr, image_sync_batch]
-    )
+    check_image_sync_flag >> asserted_records_count_task >> [image_sync, full_index_to_solr]
+    (image_sync >> get_drs_for_image_sync_index >> check_image_sync_count >> [full_index_to_solr, image_sync_batch])
     image_sync_batch >> image_sync_batch_task_grp >> full_index_to_solr
     full_index_to_solr >> full_index_to_solr_task_grp
     full_index_to_solr_task_grp >> assertion_sync >> clear_dashboard_cache
     full_index_to_solr_task_grp >> update_gbif_task
-    [
-        clear_dashboard_cache,
-        update_gbif_task,
-    ] >> ala_helper.get_success_notification_operator()
+    [clear_dashboard_cache, update_gbif_task] >> ala_helper.get_success_notification_operator()
