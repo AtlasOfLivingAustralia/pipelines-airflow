@@ -62,11 +62,7 @@ SDS_BUCKET = Variable.get("sds_bucket")
 SDS_S3_DIRECTORY = Variable.get("sds_s3_directory")
 SERVICE_ROLE = Variable.get("service_role")
 SLAVE_MARKET = Variable.get("slave_market")
-SLACK_NOTIFICATION = Variable.get("slack_notification", "false").lower() in (
-    "true",
-    "1",
-    "t",
-)
+SLACK_NOTIFICATION = Variable.get("slack_notification", "false").lower() in ("true", "1", "t")
 SLACK_ALERTS_CHANNEL = Variable.get("slack_alerts_channel")
 SOLR_COLLECTION = Variable.get("solr_collection")
 SOLR_COLLECTION_TO_KEEP = Variable.get("solr_collection_to_keep")
@@ -76,20 +72,24 @@ SOLR_REPLICATION_FACTOR = Variable.get("solr_collection_rf")
 SPARK_PROPERTIES = json.loads(Variable.get("spark_properties"))
 ZK_URL = Variable.get("zk_url")
 
-EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get(
-    "ec2_additional_master_security_groups"
-).split(",")
-EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get(
-    "ec2_additional_slave_security_groups"
-).split(",")
-KEEP_EMR_ALIVE = Variable.get("keep_emr_alive_after_finish", "false").lower() in (
-    "true",
-    "1",
-    "t",
-)
+EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get("ec2_additional_master_security_groups").split(",")
+EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get("ec2_additional_slave_security_groups").split(",")
+KEEP_EMR_ALIVE = Variable.get("keep_emr_alive_after_finish", "false").lower() in ("true", "1", "t")
 
 
 def get_bootstrap_actions(bootstrap_script):
+    """
+    Generates a list of bootstrap actions for initializing an EMR cluster.
+
+    Args:
+        bootstrap_script (str): The name of the bootstrap script to be executed, located in the S3 bucket.
+
+    Returns:
+        list: A list of dictionaries representing bootstrap actions, including the specified script and additional configuration from `get_bootstrap_config()`.
+
+    Note:
+        This function relies on the global variable `S3_BUCKET` and the function `get_bootstrap_config()`.
+    """
     return [
         {
             "Name": "Bootstrap actions for datasets",
@@ -103,6 +103,19 @@ def get_bootstrap_actions(bootstrap_script):
 
 
 def get_bootstrap_config():
+    """
+    Generates the bootstrap configuration dictionary for the Pipelines YAML config.
+
+    Returns:
+        dict: A dictionary containing the name of the config and a ScriptBootstrapAction
+            with arguments sourced from various environment variables and a script path.
+
+    The configuration includes:
+        - Name: The name of the bootstrap configuration.
+        - ScriptBootstrapAction:
+            - Args: A list of configuration values such as S3 bucket, API keys, and service URLs.
+            - Path: The S3 path to the bootstrap script.
+    """
     return {
         "Name": "Pipelines YAML config",
         "ScriptBootstrapAction": {
