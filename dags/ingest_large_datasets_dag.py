@@ -13,11 +13,7 @@ from airflow.utils.dates import days_ago
 from datetime import timedelta
 
 from ala import cluster_setup, ala_config
-from ala.ala_helper import (
-    step_bash_cmd,
-    get_default_args,
-    get_success_notification_operator,
-)
+from ala.ala_helper import step_bash_cmd, get_default_args, get_success_notification_operator
 
 DAG_ID = "Ingest_large_datasets"
 
@@ -48,35 +44,23 @@ def get_pre_image_steps(dataset_list, override_uuid_percentage=False):
         extra_args = '--extra-args="overridePercentageCheck=true"'
 
     return [
-        step_bash_cmd(
-            "c. Interpretation", f" la-pipelines interpret {dataset_list} --cluster"
-        ),
-        step_bash_cmd(
-            "d. UUID", f" la-pipelines uuid {dataset_list}  --cluster {extra_args}"
-        ),
+        step_bash_cmd("c. Interpretation", f" la-pipelines interpret {dataset_list} --cluster"),
+        step_bash_cmd("d. UUID", f" la-pipelines uuid {dataset_list}  --cluster {extra_args}"),
         step_bash_cmd("e. SDS", f" la-pipelines sds {dataset_list}  --cluster"),
     ]
 
 
 def get_load_image_steps(dataset_list):
-    return [
-        step_bash_cmd(
-            "f. Image loading", f" la-pipelines image-load {dataset_list} --cluster"
-        )
-    ]
+    return [step_bash_cmd("f. Image loading", f" la-pipelines image-load {dataset_list} --cluster")]
 
 
 def get_post_image_steps(dataset_list, run_indexing=False):
     processing = [
-        step_bash_cmd(
-            "f. Image syncing", f" la-pipelines image-sync {dataset_list} --cluster"
-        ),
+        step_bash_cmd("f. Image syncing", f" la-pipelines image-sync {dataset_list} --cluster"),
         step_bash_cmd("g. Index", f" la-pipelines index {dataset_list} --cluster"),
     ]
     if run_indexing:
-        solr_ws = (
-            f"{ala_config.SOLR_URL}/{ala_config.SOLR_COLLECTION}/update?commit=true"
-        )
+        solr_ws = f"{ala_config.SOLR_URL}/{ala_config.SOLR_COLLECTION}/update?commit=true"
         datasets = [dataset_uid for dataset_uid in dataset_list.split() if dataset_uid]
         for dataset_uid in datasets:
             processing.append(
@@ -86,23 +70,13 @@ def get_post_image_steps(dataset_list, run_indexing=False):
                     action_on_failure="CONTINUE",
                 )
             )
-        processing.append(
-            step_bash_cmd("h-2. SOLR", f" la-pipelines solr {dataset_list} --cluster")
-        )
+        processing.append(step_bash_cmd("h-2. SOLR", f" la-pipelines solr {dataset_list} --cluster"))
 
     post_processing = [
-        step_bash_cmd(
-            "h. Export", f" la-pipelines dwca-export {dataset_list} --cluster"
-        ),
+        step_bash_cmd("h. Export", f" la-pipelines dwca-export {dataset_list} --cluster"),
         step_bash_cmd("i. Add Frictionless", f" /tmp/frictionless.sh {dataset_list}"),
-        step_bash_cmd(
-            "j. Upload data",
-            f" /tmp/upload-hdfs-datasets.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}",
-        ),
-        step_bash_cmd(
-            "k. Upload export",
-            f" /tmp/upload-export.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}",
-        ),
+        step_bash_cmd("j. Upload data", f" /tmp/upload-hdfs-datasets.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}"),
+        step_bash_cmd("k. Upload export", f" /tmp/upload-export.sh {ala_config.S3_BUCKET_AVRO} {dataset_list}"),
     ]
 
     processing = processing + post_processing
@@ -136,17 +110,11 @@ with DAG(
 
         load_images = strtobool(kwargs["dag_run"].conf["load_images"])
         run_indexing = strtobool(kwargs["dag_run"].conf["run_indexing"])
-        skip_dwca_to_verbatim = strtobool(
-            kwargs["dag_run"].conf["skip_dwca_to_verbatim"]
-        )
-        override_uuid_percentage = strtobool(
-            kwargs["dag_run"].conf["override_uuid_percentage_check"]
-        )
+        skip_dwca_to_verbatim = strtobool(kwargs["dag_run"].conf["skip_dwca_to_verbatim"])
+        override_uuid_percentage = strtobool(kwargs["dag_run"].conf["override_uuid_percentage_check"])
         dataset_list = kwargs["dag_run"].conf["datasetIds"]
 
-        logging.info(
-            f"Args {dataset_list} load_images: {load_images} skip_dwca_to_verbatim: {skip_dwca_to_verbatim}"
-        )
+        logging.info(f"Args {dataset_list} load_images: {load_images} skip_dwca_to_verbatim: {skip_dwca_to_verbatim}")
 
         steps = []
 
@@ -163,10 +131,7 @@ with DAG(
         steps.extend(get_post_image_steps(dataset_list, run_indexing))
         return steps
 
-    is_empty = ShortCircuitOperator(
-        task_id="is_empty",
-        python_callable=is_empty,
-    )
+    is_empty = ShortCircuitOperator(task_id="is_empty", python_callable=is_empty)
 
     construct_steps = PythonOperator(
         dag=dag,
@@ -181,7 +146,7 @@ with DAG(
         task_id="create_emr_cluster",
         emr_conn_id="emr_default",
         job_flow_overrides=cluster_setup.get_large_cluster(
-            DAG_ID, "bootstrap-ingest-large-actions.sh"
+            DAG_ID, "bootstrap-ingest-large-actions.sh", drs="{{ dag_run.conf['datasetIds'] }}"
         ),
         aws_conn_id="aws_default",
     )

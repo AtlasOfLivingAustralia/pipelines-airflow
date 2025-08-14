@@ -345,7 +345,7 @@ with DAG(
             dag=dag,
             task_id="create_emr_cluster",
             emr_conn_id="emr_default",
-            job_flow_overrides=cluster_setup.get_large_cluster(DAG_ID, "bootstrap-index-actions.sh"),
+            job_flow_overrides=cluster_setup.get_large_cluster(DAG_ID, "bootstrap-index-actions.sh", drs="ALL"),
             aws_conn_id="aws_default",
         )
 

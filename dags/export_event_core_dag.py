@@ -16,11 +16,7 @@ from airflow.utils.dates import days_ago
 from datetime import timedelta, timezone, datetime
 
 from ala import ala_config, cluster_setup
-from ala.ala_helper import (
-    step_bash_cmd,
-    get_default_args,
-    get_success_notification_operator,
-)
+from ala.ala_helper import step_bash_cmd, get_default_args, get_success_notification_operator
 from ala.doi_service import S3Service
 from ala.doi_service import CollectoryService
 from requests_oauth2client import OAuth2Client, BearerAuth
@@ -50,10 +46,7 @@ def get_spark_steps(dataset_list, request_id, search_query):
             "c. Run Export",
             f" la-pipelines predicate-export {dataset_list} --cluster --jobId={request_id} --queryFile=/tmp/query.json",
         ),
-        step_bash_cmd(
-            "d. Add Frictionless Data package.json",
-            f" /tmp/frictionless.sh {dataset_list}",
-        ),
+        step_bash_cmd("d. Add Frictionless Data package.json", f" /tmp/frictionless.sh {dataset_list}"),
         step_bash_cmd(
             "e. Create DOI, add extra metadata to the generate ZIP, and upload to S3",
             f' sudo -u hadoop python3 /tmp/doi_service.py --request_id={request_id} --apiKey={ala_config.DOI_API_KEY} --dataset_list="{dataset_list}" --doi_server={ala_config.DOI_URL} --collectory_server={ala_config.REGISTRY_URL} --s3_bucket={ala_config.S3_BUCKET_AVRO} --search_query="{search_query}"',
@@ -73,18 +66,11 @@ with DAG(
         "datasetId": "dr18391",
         "creator": "Dave Martin",
         "notificationAddresses": ["david.martin@csiro.au"],
-        "predicate": {
-            "type": "and",
-            "predicates": [
-                {"type": "in", "key": "stateProvince", "values": ["Victoria"]}
-            ],
-        },
+        "predicate": {"type": "and", "predicates": [{"type": "in", "key": "stateProvince", "values": ["Victoria"]}]},
     },
 ) as dag:
 
-    def write_request_info(
-        dataset_list, predicate, request_id, start_time, finish_time, status
-    ):
+    def write_request_info(dataset_list, predicate, request_id, start_time, finish_time, status):
         content = json.dumps(
             {
                 "datasetId": dataset_list,
@@ -99,9 +85,7 @@ with DAG(
 
         # Upload the file
         s3 = boto3.resource("s3")
-        s3.Object(ala_config.S3_BUCKET_AVRO, f"exports/{request_id}/status.json").put(
-            Body=content
-        )
+        s3.Object(ala_config.S3_BUCKET_AVRO, f"exports/{request_id}/status.json").put(Body=content)
         return True
 
     def mark_as_complete(**kwargs):
@@ -110,9 +94,7 @@ with DAG(
         request_id = kwargs["ti"].xcom_pull(key="requestID")
         start_time = kwargs["ti"].xcom_pull(key="startTime")
         finish_time = datetime.now(timezone.utc).isoformat()
-        write_request_info(
-            dataset_list, predicate, request_id, start_time, finish_time, "COMPLETE"
-        )
+        write_request_info(dataset_list, predicate, request_id, start_time, finish_time, "COMPLETE")
 
     def construct_steps_with_options(**kwargs):
         # validate
@@ -138,9 +120,7 @@ with DAG(
         kwargs["ti"].xcom_push(key="requestID", value=request_id)
         kwargs["ti"].xcom_push(key="startTime", value=start_time)
 
-        write_request_info(
-            dataset_list, predicate, request_id, start_time, "", "STARTED"
-        )
+        write_request_info(dataset_list, predicate, request_id, start_time, "", "STARTED")
 
         # write the query to S3
         s3 = boto3.resource("s3")
@@ -162,27 +142,15 @@ with DAG(
         creator = kwargs["dag_run"].conf["creator"]
 
         oauth2client = OAuth2Client(
-            token_endpoint=ala_config.AUTH_TOKEN_URL,
-            auth=(ala_config.AUTH_CLIENT_ID, ala_config.AUTH_CLIENT_SECRET),
+            token_endpoint=ala_config.AUTH_TOKEN_URL, auth=(ala_config.AUTH_CLIENT_ID, ala_config.AUTH_CLIENT_SECRET)
         )
 
         # We may not need to use the real resource
-        token = oauth2client.client_credentials(
-            scope="users/read", resource=ala_config.USER_DETAILS_ENDPOINT
-        )
+        token = oauth2client.client_credentials(scope="users/read", resource=ala_config.USER_DETAILS_ENDPOINT)
         resp = requests.post(
-            ala_config.USER_DETAILS_ENDPOINT
-            + "?userName="
-            + creator
-            + "&includeProps=true",
-            auth=BearerAuth(token),
+            ala_config.USER_DETAILS_ENDPOINT + "?userName=" + creator + "&includeProps=true", auth=BearerAuth(token)
         )
-        user_info = {
-            "id": creator,
-            "firstName": creator,
-            "lastName": creator,
-            "email": creator,
-        }
+        user_info = {"id": creator, "firstName": creator, "lastName": creator, "email": creator}
         if resp.status_code == 200:
             resp_json = json.loads(resp.text)
             user_info = {
@@ -191,11 +159,7 @@ with DAG(
                 "lastName": resp_json["lastName"],
                 "email": resp_json["email"],
             }
-            print(
-                "Hi {}, we will send email to {}".format(
-                    user_info.get("id"), user_info.get("email")
-                )
-            )
+            print("Hi {}, we will send email to {}".format(user_info.get("id"), user_info.get("email")))
         else:
             print("Warning: cannot get user information of user:" + creator)
 
@@ -214,19 +178,11 @@ with DAG(
         dataset_list = dataset_list_str.split()
 
         for dataset_id in dataset_list:
-            doi_details = s3_service.read_doi(
-                ala_config.S3_BUCKET_AVRO, dataset_id, request_id
-            )
-            file_size_mb = s3_service.get_size(
-                ala_config.S3_BUCKET_AVRO, dataset_id, request_id
-            )
+            doi_details = s3_service.read_doi(ala_config.S3_BUCKET_AVRO, dataset_id, request_id)
+            file_size_mb = s3_service.get_size(ala_config.S3_BUCKET_AVRO, dataset_id, request_id)
             print("URL of the DOI record: " + doi_details.get("url"))
-            kwargs["ti"].xcom_push(
-                key=f"doi_url_{dataset_id}", value=doi_details.get("url")
-            )
-            kwargs["ti"].xcom_push(
-                key=f"doi_{dataset_id}", value=doi_details.get("doi")
-            )
+            kwargs["ti"].xcom_push(key=f"doi_url_{dataset_id}", value=doi_details.get("url"))
+            kwargs["ti"].xcom_push(key=f"doi_{dataset_id}", value=doi_details.get("doi"))
             kwargs["ti"].xcom_push(key=f"file_size_mb_{dataset_id}", value=file_size_mb)
 
     def generate_email(**kwargs):
@@ -239,9 +195,7 @@ with DAG(
         dataset_list_html = ""
 
         for dataset_id in dataset_list:
-            dataset_info = CollectoryService.get_resource_info(
-                ala_config.REGISTRY_URL, dataset_id
-            )
+            dataset_info = CollectoryService.get_resource_info(ala_config.REGISTRY_URL, dataset_id)
             data_resource_name = "Untitled dataset"
             if dataset_info["status"]:
                 data_resource_name = dataset_info["name"]
@@ -301,9 +255,7 @@ with DAG(
         request_id = kwargs["ti"].xcom_pull(key="requestID")
 
         for dataset_id in dataset_list:
-            dataset_info = CollectoryService.get_resource_info(
-                ala_config.REGISTRY_URL, dataset_id
-            )
+            dataset_info = CollectoryService.get_resource_info(ala_config.REGISTRY_URL, dataset_id)
             data_resource_name = "Untitled dataset"
             if dataset_info["status"]:
                 data_resource_name = dataset_info["name"]
@@ -338,11 +290,7 @@ with DAG(
         kwargs["ti"].xcom_push(key="html_error_email", value=html)
 
     collect_user_info = PythonOperator(
-        dag=dag,
-        task_id="collect_user_info",
-        provide_context=True,
-        op_kwargs={},
-        python_callable=read_user_details,
+        dag=dag, task_id="collect_user_info", provide_context=True, op_kwargs={}, python_callable=read_user_details
     )
 
     construct_steps = PythonOperator(
@@ -354,11 +302,7 @@ with DAG(
     )
 
     read_doi = PythonOperator(
-        dag=dag,
-        task_id="read_doi",
-        provide_context=True,
-        op_kwargs={},
-        python_callable=read_doi_info,
+        dag=dag, task_id="read_doi", provide_context=True, op_kwargs={}, python_callable=read_doi_info
     )
 
     # construct_steps
@@ -401,7 +345,7 @@ with DAG(
         task_id="create_emr_cluster",
         emr_conn_id="emr_default",
         job_flow_overrides=cluster_setup.get_large_cluster(
-            DAG_ID, "bootstrap-export-event-core-actions.sh"
+            DAG_ID, "bootstrap-export-event-core-actions.sh", drs="{{ dag_run.conf['datasetId'] }}"
         ),
         aws_conn_id="aws_default",
     )
@@ -430,11 +374,7 @@ with DAG(
     )
 
     mark_as_complete = PythonOperator(
-        dag=dag,
-        task_id="mark_as_complete",
-        provide_context=True,
-        op_kwargs={},
-        python_callable=mark_as_complete,
+        dag=dag, task_id="mark_as_complete", provide_context=True, op_kwargs={}, python_callable=mark_as_complete
     )
 
     (
