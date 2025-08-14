@@ -15,15 +15,29 @@ def run_large_emr(
     ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB,
     cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT,
 ):
+    """
+    Creates and manages an AWS EMR cluster workflow within an Airflow DAG.
+    This function sets up a sequence of Airflow tasks to:
+    1. Create a large EMR cluster.
+    2. Add Spark steps to the cluster.
+    3. Monitor the execution of the Spark steps.
+    4. Wait for the EMR cluster to terminate.
+    5. Send a success notification upon completion.
+    Args:
+        dag (airflow.models.DAG): The Airflow DAG to which the tasks will be added.
+        spark_steps (list): A list of Spark step definitions to be executed on the EMR cluster.
+        bootstrap_script (str): The path or URI to the bootstrap script to initialize the cluster.
+        ebs_size_in_gb (int, optional): The size of the EBS volume in GB for each instance. Defaults to ala_config.EC2_LARGE_EBS_SIZE_IN_GB.
+        cluster_size (int, optional): The number of EC2 instances in the cluster. Defaults to ala_config.EC2_LARGE_INSTANCE_COUNT.
+    Returns:
+        None: The function defines task dependencies within the DAG but does not return a value.
+    """
     cluster_creator = EmrCreateJobFlowOperator(
         dag=dag,
         task_id="create_emr_cluster",
         emr_conn_id="emr_default",
         job_flow_overrides=get_large_cluster(
-            dag.dag_id,
-            bootstrap_script,
-            ebs_size_in_gb=ebs_size_in_gb,
-            cluster_size=cluster_size,
+            dag.dag_id, bootstrap_script, ebs_size_in_gb=ebs_size_in_gb, cluster_size=cluster_size
         ),
         aws_conn_id="aws_default",
     )
@@ -51,13 +65,8 @@ def run_large_emr(
         aws_conn_id="aws_default",
     )
 
-    (
-        cluster_creator
-        >> step_adder
-        >> step_checker
-        >> wait_for_termination
-        >> get_success_notification_operator()
-    )
+    # Set task dependencies for Airflow DAG
+    cluster_creator >> step_adder >> step_checker >> wait_for_termination >> get_success_notification_operator()
 
 
 def obj_as_dict(obj):
@@ -74,12 +83,31 @@ def obj_as_dict(obj):
 
 
 def sanitize_tag(input_string):
+    """
+    Sanitizes the input string by removing any characters that are not alphanumeric,
+    whitespace, period, underscore, colon, forward slash, equals sign, plus, or minus.
+
+    Args:
+        input_string (str): The string to be sanitized.
+
+    Returns:
+        str: The sanitized string containing only allowed characters.
+    """
     allowed_characters = re.compile(r"[^a-zA-Z0-9\s\._:/=+\-]")
     sanitized_string = re.sub(allowed_characters, "", input_string)
     return sanitized_string
 
 
 def get_environment():
+    """
+    Determines the current environment type based on the value of `ala_config.ENVIRONMENT_TYPE`.
+
+    Returns:
+        str: A string representing the environment type. Possible values are:
+            - "production" if the environment type contains "prod"
+            - "development" if the environment type contains "dev"
+            - "testing" if the environment type contains "test"
+    """
     if "prod" in ala_config.ENVIRONMENT_TYPE.lower():
         return "production"
     if "dev" in ala_config.ENVIRONMENT_TYPE.lower():
@@ -128,7 +156,7 @@ class EMRConfig:
 
     @property
     def Name(self) -> str:
-        return f"{self.name} [{ala_config.S3_BUCKET}]"
+        return f"{self.name} [{get_environment().upper()}]"
 
     @property
     def LogUri(self) -> str:
@@ -178,12 +206,7 @@ class PreIngestionEMRConfig(EMRConfig):
                 "InstanceCount": 1,
                 "EbsConfiguration": {
                     "EbsBlockDeviceConfigs": [
-                        {
-                            "VolumeSpecification": {
-                                "SizeInGB": self.ebs_size_in_gb,
-                                "VolumeType": "standard",
-                            }
-                        }
+                        {"VolumeSpecification": {"SizeInGB": self.ebs_size_in_gb, "VolumeType": "standard"}}
                     ]
                 },
             }
@@ -207,6 +230,7 @@ class PreIngestionEMRConfig(EMRConfig):
     def __post_init__(self):
         super().__post_init__()
         self.Tags += [{"Key": "product", "Value": "preingestion"}]
+        self.Tags += [{"Key": "emrcluster", "Value": "single node"}]
 
 
 @dataclass
@@ -214,14 +238,9 @@ class PipelinesEMRConfig(EMRConfig):
     """Base configuration for EMR cluster for pipelines."""
 
     ReleaseLabel: str = field(default=ala_config.EMR_RELEASE, init=False)
-    Applications: list = field(
-        default_factory=lambda: [{"Name": "Spark"}, {"Name": "Hadoop"}], init=False
-    )
+    Applications: list = field(default_factory=lambda: [{"Name": "Spark"}, {"Name": "Hadoop"}], init=False)
     Configurations: list = field(
-        default_factory=lambda: [
-            {"Classification": "spark", "Properties": ala_config.SPARK_PROPERTIES}
-        ],
-        init=False,
+        default_factory=lambda: [{"Classification": "spark", "Properties": ala_config.SPARK_PROPERTIES}], init=False
     )
 
     def __post_init__(self):
@@ -247,16 +266,15 @@ class PipelinesSingleEMRConfig(PipelinesEMRConfig):
                 "InstanceCount": 1,
                 "EbsConfiguration": {
                     "EbsBlockDeviceConfigs": [
-                        {
-                            "VolumeSpecification": {
-                                "SizeInGB": self.ebs_size_in_gb,
-                                "VolumeType": "standard",
-                            }
-                        }
+                        {"VolumeSpecification": {"SizeInGB": self.ebs_size_in_gb, "VolumeType": "standard"}}
                     ]
                 },
             }
         ]
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.Tags += [{"Key": "emrcluster", "Value": "single node"}]
 
 
 @dataclass
@@ -278,12 +296,7 @@ class PipelinesMultiEMRConfig(PipelinesEMRConfig):
                 "InstanceCount": 1,
                 "EbsConfiguration": {
                     "EbsBlockDeviceConfigs": [
-                        {
-                            "VolumeSpecification": {
-                                "SizeInGB": self.ebs_size_in_gb,
-                                "VolumeType": "standard",
-                            }
-                        }
+                        {"VolumeSpecification": {"SizeInGB": self.ebs_size_in_gb, "VolumeType": "standard"}}
                     ]
                 },
             },
@@ -295,19 +308,30 @@ class PipelinesMultiEMRConfig(PipelinesEMRConfig):
                 "InstanceCount": self.slave_instance_count,
                 "EbsConfiguration": {
                     "EbsBlockDeviceConfigs": [
-                        {
-                            "VolumeSpecification": {
-                                "SizeInGB": self.ebs_size_in_gb,
-                                "VolumeType": "standard",
-                            }
-                        }
+                        {"VolumeSpecification": {"SizeInGB": self.ebs_size_in_gb, "VolumeType": "standard"}}
                     ]
                 },
             },
         ]
 
+    def __post_init__(self):
+        super().__post_init__()
+        self.Tags += [{"Key": "emrcluster", "Value": f"{1+self.slave_instance_count} node"}]
+
 
 def get_pre_ingestion_cluster(dag_id, instance_type, name, drs=""):
+    """
+    Creates and returns a dictionary representation of a PreIngestionEMRConfig object for a pre-ingestion EMR cluster.
+
+    Args:
+        dag_id (str): The DAG identifier associated with the EMR cluster.
+        instance_type (str): The type of EC2 instance to use for the cluster.
+        name (str): The name to assign to the EMR cluster.
+        drs (str, optional): Data resource string(s) to be used by the cluster. Defaults to an empty string.
+
+    Returns:
+        dict: A dictionary representation of the PreIngestionEMRConfig object.
+    """
     return obj_as_dict(
         PreIngestionEMRConfig(
             dag_id=dag_id,
@@ -319,18 +343,25 @@ def get_pre_ingestion_cluster(dag_id, instance_type, name, drs=""):
     )
 
 
-def get_small_cluster(
-    dag_id,
-    bootstrap_actions_script,
-    ebs_size_in_gb=ala_config.EC2_SMALL_EBS_SIZE_IN_GB,
-    drs="",
-):
+def get_small_cluster(dag_id, bootstrap_actions_script, ebs_size_in_gb=ala_config.EC2_SMALL_EBS_SIZE_IN_GB, drs=""):
+    """
+    Creates and returns a dictionary representation of a small EMR cluster configuration.
+
+    Args:
+        dag_id (str): The DAG identifier for the cluster.
+        bootstrap_actions_script (str): Path or identifier for the bootstrap actions script.
+        ebs_size_in_gb (int, optional): Size of the EBS volume in GB. Defaults to ala_config.EC2_SMALL_EBS_SIZE_IN_GB.
+        drs (str, optional): Data resource string or identifier. Defaults to an empty string.
+
+    Returns:
+        dict: Dictionary representation of the PipelinesSingleEMRConfig object for a small cluster.
+    """
     bootstrap_actions = ala_config.get_bootstrap_actions(bootstrap_actions_script)
     return obj_as_dict(
         PipelinesSingleEMRConfig(
             dag_id=dag_id,
             instance_type=ala_config.EC2_SMALL_INSTANCE_TYPE,
-            name=dag_id,
+            name=f"{dag_id} {drs}",
             ebs_size_in_gb=ebs_size_in_gb,
             BootstrapActions=bootstrap_actions,
             data_resources=drs,
@@ -345,13 +376,26 @@ def get_medium_cluster(
     cluster_size=ala_config.EC2_MEDIUM_INSTANCE_COUNT,
     drs="",
 ):
+    """
+    Creates and returns a dictionary representation of a medium-sized EMR cluster configuration.
+
+    Args:
+        dag_id (str): The DAG identifier for the cluster.
+        bootstrap_actions_script (str): Path or identifier for the bootstrap actions script.
+        ebs_size_in_gb (int, optional): Size of the EBS volume in GB for each instance. Defaults to ala_config.EC2_MEDIUM_EBS_SIZE_IN_GB.
+        cluster_size (int, optional): Number of slave instances in the cluster. Defaults to ala_config.EC2_MEDIUM_INSTANCE_COUNT.
+        drs (str, optional): Data resources string or identifier. Defaults to an empty string.
+
+    Returns:
+        dict: Dictionary representation of the PipelinesMultiEMRConfig for the medium cluster.
+    """
     bootstrap_actions = ala_config.get_bootstrap_actions(bootstrap_actions_script)
 
     return obj_as_dict(
         PipelinesMultiEMRConfig(
             dag_id=dag_id,
             instance_type=ala_config.EC2_LARGE_INSTANCE_TYPE,
-            name=dag_id,
+            name=f"{dag_id} {drs}",
             ebs_size_in_gb=ebs_size_in_gb,
             slave_instance_count=cluster_size,
             BootstrapActions=bootstrap_actions,
@@ -367,12 +411,25 @@ def get_large_cluster(
     cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT,
     drs="",
 ):
+    """
+    Creates and returns a dictionary representation of a large EMR cluster configuration.
+
+    Args:
+        dag_id (str): The DAG identifier for the cluster.
+        bootstrap_actions_script (str): Path or identifier for the bootstrap actions script.
+        ebs_size_in_gb (int, optional): Size of the EBS volume in GB for each instance. Defaults to ala_config.EC2_LARGE_EBS_SIZE_IN_GB.
+        cluster_size (int, optional): Number of slave instances in the cluster. Defaults to ala_config.EC2_LARGE_INSTANCE_COUNT.
+        drs (str, optional): Data resources string or configuration. Defaults to an empty string.
+
+    Returns:
+        dict: Dictionary representation of the PipelinesMultiEMRConfig for the large cluster.
+    """
     bootstrap_actions = ala_config.get_bootstrap_actions(bootstrap_actions_script)
     return obj_as_dict(
         PipelinesMultiEMRConfig(
             dag_id=dag_id,
             instance_type=ala_config.EC2_LARGE_INSTANCE_TYPE,
-            name=dag_id,
+            name=f"{dag_id} {drs}",
             ebs_size_in_gb=ebs_size_in_gb,
             slave_instance_count=cluster_size,
             BootstrapActions=bootstrap_actions,
