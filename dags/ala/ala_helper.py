@@ -56,9 +56,7 @@ def json_parse(base_url: str, url_path: str, params={}, headers=None):
             json_result = json.loads(response.content)
             return json_result
     except requests.exceptions.HTTPError as err:
-        logging.error(
-            f"Error encountered during request {full_url} with params {params}", err
-        )
+        logging.error(f"Error encountered during request {full_url} with params {params}", err)
         raise IOError(err)
 
 
@@ -74,9 +72,7 @@ def get_dr_count(dr: str):
     """
     try:
         biocache_json = json_parse(
-            ala_config.BIOCACHE_WS,
-            "/occurrences/search",
-            {"q": f"data_resource_uid:{dr}", "pageSize": "0"},
+            ala_config.BIOCACHE_WS, "/occurrences/search", {"q": f"data_resource_uid:{dr}", "pageSize": "0"}
         )
         return biocache_json["totalRecords"]
     except requests.exceptions.HTTPError as err:
@@ -134,19 +130,14 @@ def get_image_sync_steps(s3_bucket_avro: str, dataset_list: []):
     """
     return [
         step_bash_cmd(
-            "Download datasets avro",
-            f" /tmp/download-datasets-image-sync.sh {s3_bucket_avro} {dataset_list}",
+            "Download datasets avro", f" /tmp/download-datasets-image-sync.sh {s3_bucket_avro} {dataset_list}"
+        ),
+        step_bash_cmd("Image sync", f" la-pipelines image-sync {dataset_list} --cluster"),
+        step_bash_cmd(
+            "Index", f" la-pipelines index {dataset_list} --cluster --extra-args timeBufferInMillis=604800000"
         ),
         step_bash_cmd(
-            "Image sync", f" la-pipelines image-sync {dataset_list} --cluster"
-        ),
-        step_bash_cmd(
-            "Index",
-            f" la-pipelines index {dataset_list} --cluster --extra-args timeBufferInMillis=604800000",
-        ),
-        step_bash_cmd(
-            "Upload datasets avro",
-            f" /tmp/upload-indexed-image-sync-datasets.sh {s3_bucket_avro} {dataset_list}",
+            "Upload datasets avro", f" /tmp/upload-indexed-image-sync-datasets.sh {s3_bucket_avro} {dataset_list}"
         ),
     ]
 
@@ -164,9 +155,7 @@ def read_solr_collection_date() -> str:
         ValueError: If the 'biocache' Solr collection is not found or its name is not in the expected format.
     """
 
-    json_str = json_parse(
-        ala_config.SOLR_URL, "/admin/collections", {"action": "CLUSTERSTATUS"}
-    )
+    json_str = json_parse(ala_config.SOLR_URL, "/admin/collections", {"action": "CLUSTERSTATUS"})
     biocache_collection = json_str["cluster"]["aliases"]["biocache"]
     matches = re.findall(r".*-(\d{4}-\d{2}-\d{2})-.*", biocache_collection)
     return matches[0]
@@ -281,18 +270,12 @@ def step_cmd_args(step_name, cmd_arr, action_on_failure="TERMINATE_CLUSTER"):
     }
 
 
-def list_objects_in_bucket(
-    bucket_name, obj_prefix, obj_key_regex, sub_dr_folder="", time_range=(None, None)
-):
+def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder="", time_range=(None, None)):
     def list_folders_in_bucket(bucket_name, obj_prefix, delimiter, regex):
-        response = s3.list_objects_v2(
-            Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter
-        )
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter)
         folders = []
         while True:
-            folders += [
-                o.get("Prefix").split("/")[-2] for o in response.get("CommonPrefixes")
-            ]
+            folders += [o.get("Prefix").split("/")[-2] for o in response.get("CommonPrefixes")]
 
             # Check if there are more results to retrieve
             if response.get("NextContinuationToken"):
@@ -307,11 +290,7 @@ def list_objects_in_bucket(
                 break
 
         dr_pattern = re.compile(regex)
-        drs = [
-            dr
-            for dr in list(filter(dr_pattern.match, folders))
-            if dr not in ala_config.EXCLUDED_DATASETS
-        ]
+        drs = [dr for dr in list(filter(dr_pattern.match, folders)) if dr not in ala_config.EXCLUDED_DATASETS]
         return drs
 
     def process_prefix(l_prefix, l_dr):
@@ -326,15 +305,9 @@ def list_objects_in_bucket(
                     lower_range = True
                     higher_range = True
                     if time_range[0]:
-                        lower_range = (
-                            my_bucket_object["LastModified"].isoformat()
-                            >= time_range[0]
-                        )
+                        lower_range = my_bucket_object["LastModified"].isoformat() >= time_range[0]
                     if time_range[1]:
-                        higher_range = (
-                            my_bucket_object["LastModified"].isoformat()
-                            <= time_range[1]
-                        )
+                        higher_range = my_bucket_object["LastModified"].isoformat() <= time_range[1]
                     if lower_range and higher_range:
                         results[l_dr] = my_bucket_object["Size"]
 
@@ -345,9 +318,7 @@ def list_objects_in_bucket(
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         session = boto3.Session()
         s3 = session.client("s3")
-        drs = list_folders_in_bucket(
-            bucket_name, obj_prefix, delimiter="/", regex=r"^dr[0-9]+$"
-        )
+        drs = list_folders_in_bucket(bucket_name, obj_prefix, delimiter="/", regex=r"^dr[0-9]+$")
         futures = []
         for dr in drs:
             prefix = f"{obj_prefix}{dr}/{sub_dr_folder}"
@@ -365,9 +336,7 @@ def list_objects_in_bucket(
 
 
 def list_drs_dwca_in_bucket(**kwargs):
-    return list_objects_in_bucket(
-        kwargs["bucket"], "dwca-imports/", r"^.*/(dr[0-9]+)\.zip$", sub_dr_folder=""
-    )
+    return list_objects_in_bucket(kwargs["bucket"], "dwca-imports/", r"^.*/(dr[0-9]+)\.zip$", sub_dr_folder="")
 
 
 def list_drs_index_avro_in_bucket(**kwargs):
@@ -402,10 +371,7 @@ def list_drs_ingested_since(**kwargs):
 
 
 def step_s3_cp_file(dr, source_path, target_path):
-    return step_cmd_args(
-        f"Copy {source_path} to {target_path} for {dr}",
-        ["aws", "s3", "cp", source_path, target_path],
-    )
+    return step_cmd_args(f"Copy {source_path} to {target_path} for {dr}", ["aws", "s3", "cp", source_path, target_path])
 
 
 def hdfs_dwca_exist(s3_pipelines_dwca) -> dict:
@@ -413,9 +379,7 @@ def hdfs_dwca_exist(s3_pipelines_dwca) -> dict:
     s3 = boto3.resource(parsed_url.scheme)
     pipelines_s3_bucket = s3.Bucket(parsed_url.hostname)
     print(f"Checking s3 bucket {parsed_url.hostname} for resource {parsed_url.path}")
-    file_exist = bool(
-        list(pipelines_s3_bucket.objects.filter(Prefix=parsed_url.path.lstrip("/")))
-    )
+    file_exist = bool(list(pipelines_s3_bucket.objects.filter(Prefix=parsed_url.path.lstrip("/"))))
     print(f"Check {s3_pipelines_dwca}. Resource returned: {file_exist}")
     return file_exist
 
@@ -455,8 +419,7 @@ def get_slack_blocks(status):
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": icon
-                + "[{{ var.value.environment }}] {{ dag.dag_id }}    #{{ dag_run.id }}",
+                "text": icon + "[{{ var.value.environment }}] {{ dag.dag_id }}    #{{ dag_run.id }}",
             },
         },
         {
@@ -481,26 +444,11 @@ def get_slack_blocks(status):
         {
             "type": "section",
             "fields": [
-                {
-                    "type": "mrkdwn",
-                    "text": "*Execution started at :*",
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": "{{macros.datetime_diff_for_humans(dag_run.start_date)}}",
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": "*DAG run logical date:*",
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": "{{ logical_date.in_timezone('Australia/Sydney') | ts }}",
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": "*Start date of prior successful Dag run :*",
-                },
+                {"type": "mrkdwn", "text": "*Execution started at :*"},
+                {"type": "mrkdwn", "text": "{{macros.datetime_diff_for_humans(dag_run.start_date)}}"},
+                {"type": "mrkdwn", "text": "*DAG run logical date:*"},
+                {"type": "mrkdwn", "text": "{{ logical_date.in_timezone('Australia/Sydney') | ts }}"},
+                {"type": "mrkdwn", "text": "*Start date of prior successful Dag run :*"},
                 {
                     "type": "mrkdwn",
                     "text": "{{ prev_start_date_success.in_timezone('Australia/Sydney') | ts if prev_start_date_success is not none else 'No previous start date available' }}",
@@ -510,9 +458,7 @@ def get_slack_blocks(status):
             ],
         }
     )
-    blocks.append(
-        {"type": "divider"},
-    )
+    blocks.append({"type": "divider"})
     return blocks
 
 
@@ -521,9 +467,7 @@ def slack_alert(status: Status):
     if ala_config.SLACK_NOTIFICATION:
         slack_notification = [
             send_slack_notification(
-                slack_conn_id="slack_api_conn",
-                channel=ala_config.SLACK_ALERTS_CHANNEL,
-                blocks=get_slack_blocks(status),
+                slack_conn_id="slack_api_conn", channel=ala_config.SLACK_ALERTS_CHANNEL, blocks=get_slack_blocks(status)
             )
         ]
 
@@ -562,9 +506,7 @@ def validate_jar(jar_file):
         # Try to open the file as a ZIP archive (JAR files are ZIP archives)
         with zipfile.ZipFile(jar_file, "r") as jar:
             # Check for essential JAR metadata
-            meta_entries = [
-                entry for entry in jar.namelist() if entry.endswith("MANIFEST.MF")
-            ]
+            meta_entries = [entry for entry in jar.namelist() if entry.endswith("MANIFEST.MF")]
 
             # Optional: Additional checks
             if not any(entry.endswith(".class") for entry in jar.namelist()):
@@ -586,3 +528,10 @@ def enable_debugpy():
     else:
         debugpy.listen(("0.0.0.0", 10001))
         debugpy.wait_for_client()
+
+
+def get_assertion_records_count():
+    records_with_assertions = json.loads(
+        requests.get(f"{ala_config.BIOCACHE_URL}/occurrence/search?q=userAssertions%3A*&pageSize=0").text
+    )
+    return records_with_assertions.get("totalRecords", 0)
