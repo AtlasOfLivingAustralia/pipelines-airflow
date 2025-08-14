@@ -79,6 +79,7 @@ x-airflow-common:
     # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
   volumes:
     - ..:/opt/airflow
+    - ~/.ssh:/home/airflow/.ssh:ro
     # - ../logs:/opt/airflow/logs
     # - ../config:/opt/airflow/config
     # - ../plugins:/opt/airflow/plugins

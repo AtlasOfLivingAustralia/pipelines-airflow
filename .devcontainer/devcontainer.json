@@ -19,7 +19,7 @@
 		"source=${localWorkspaceFolder},target=/opt/airflow,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/${remoteUser}/.cache,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/${remoteUser}/.command-history,type=bind,consistency=cached",
-		"source=~/.ssh,target=/home/airflow/.ssh,type=bind,consistency=cached",
+		"source=~/.git,target=/home/airflow/.git,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.devcontainer/.bash_aliases,target=/home/airflow/.bash_aliases,type=bind,consistency=cached"
 		],
