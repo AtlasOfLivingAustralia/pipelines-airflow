@@ -166,7 +166,7 @@ services:
     command: 
       [
         "bash", 
-        "-c", " pip install -U -r /opt/airflow/dags/requirements-dev-worker.txt && airflow celery worker --concurrency=10"
+        "-c", "ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-frost-1.ala && pip install -U -r /opt/airflow/dags/requirements-dev-worker.txt && airflow celery worker --concurrency=10"
       ]
     healthcheck:
       # yamllint disable rule:line-length
