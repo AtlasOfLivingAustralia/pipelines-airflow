@@ -187,7 +187,7 @@ with DAG(
 
     clear_dashboards_task = PythonOperator(
         task_id="clear_dashboards",
-        python_callable=ala_helper.call_url,
+        python_callable=lambda url: ala_helper.call_url(url).status_code,
         provide_context=True,
         op_args=[ala_config.DASHBOARD_CACHE_CLEAR_URL],
     )

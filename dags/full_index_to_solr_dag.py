@@ -402,9 +402,10 @@ with DAG(
 
     clear_dashboard_cache = PythonOperator(
         task_id="clear_dashboard_cache",
-        python_callable=ala_helper.call_url,
+        python_callable=lambda url: ala_helper.call_url(url).status_code,
         op_kwargs={"url": ala_config.DASHBOARD_CACHE_CLEAR_URL},
     )
+
     check_image_sync_flag >> asserted_records_count_task >> [image_sync, full_index_to_solr]
     (image_sync >> get_drs_for_image_sync_index >> check_image_sync_count >> [full_index_to_solr, image_sync_batch])
     image_sync_batch >> image_sync_batch_task_grp >> full_index_to_solr

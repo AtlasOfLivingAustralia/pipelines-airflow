@@ -56,15 +56,7 @@ with DAG(
         update_gbif_metadata_op = PythonOperator(
             task_id="call_collectory",
             provide_context=True,
-            op_kwargs={
-                "ala_api_key": ala_config.ALA_API_KEY,
-                "registry_url": ala_config.COLLECTORY_SERVER,
-            },
+            op_kwargs={"ala_api_key": ala_config.ALA_API_KEY, "registry_url": ala_config.COLLECTORY_SERVER},
             python_callable=update_gbif_metadata,
         )
-
-        (
-            sync_s3_buckets_bash_op
-            >> update_gbif_metadata_op
-            >> ala_helper.get_success_notification_operator()
-        )
+        sync_s3_buckets_bash_op >> update_gbif_metadata_op >> ala_helper.get_success_notification_operator()

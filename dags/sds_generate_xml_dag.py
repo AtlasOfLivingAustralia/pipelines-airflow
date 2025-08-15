@@ -31,10 +31,7 @@ def taskflow():
         sds_nexus_directory = ala_config.SDS_NEXUS_STABLE_DIRECTORY
         sds_version = ala_config.SDS_VERSION
         jar_url = ala_helper.join_url(
-            sds_artifact_url,
-            sds_nexus_directory,
-            sds_version,
-            f"sds-{sds_version}-shaded.jar",
+            sds_artifact_url, sds_nexus_directory, sds_version, f"sds-{sds_version}-shaded.jar"
         )
         jar_file = f"/tmp/sds-{sds_version}-shaded.jar"
         print(f"Getting URL: {jar_url}, saving to {jar_file}")
@@ -62,11 +59,7 @@ def taskflow():
 
         for file_name in files_to_download:
             print(f"Downloading {file_name} from s3://{s3_bucket}/{s3_directory}")
-            s3.download_file(
-                s3_bucket,
-                f"{s3_directory}/{file_name}",
-                f"/tmp/{file_name}",
-            )
+            s3.download_file(s3_bucket, f"{s3_directory}/{file_name}", f"/tmp/{file_name}")
         print(f"Downloaded {', '.join(files_to_download)} from s3")
 
     @task
@@ -97,21 +90,14 @@ def taskflow():
 
         s3 = boto3.client("s3")
         # Push the results to S3
-        s3.upload_file(
-            xml_file_path,
-            s3_bucket,
-            s3_directory + "/" + os.path.basename(xml_file_path),
-        )
+        s3.upload_file(xml_file_path, s3_bucket, s3_directory + "/" + os.path.basename(xml_file_path))
         print(f"Uploaded {xml_file_path} to s3://{s3_bucket}/{s3_directory}")
 
     download_jar_op = download_jar()
     download_xmls_op = download_xmls()
     generate_xml_op = generate_xml(download_jar_op)
     generate_xml_op.set_upstream(download_xmls_op)
-    (
-        upload_generated_xml(generate_xml_op)
-        >> ala_helper.get_success_notification_operator()
-    )
+    upload_generated_xml(generate_xml_op) >> ala_helper.get_success_notification_operator()
 
 
 dag = taskflow()
