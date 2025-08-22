@@ -80,6 +80,7 @@ x-airflow-common:
   volumes:
     - ..:/opt/airflow
     - ~/.ssh:/home/airflow/.ssh:ro
+    - ~/.aws:/home/airflow/.aws:ro
     # - ../logs:/opt/airflow/logs
     # - ../config:/opt/airflow/config
     # - ../plugins:/opt/airflow/plugins
