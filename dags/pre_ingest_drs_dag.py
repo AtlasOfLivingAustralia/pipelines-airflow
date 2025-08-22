@@ -14,12 +14,7 @@ from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
 from datetime import datetime, timedelta
 from airflow.utils.dates import days_ago
 from ala import ala_config, cluster_setup
-from ala.ala_helper import (
-    step_bash_cmd,
-    get_dr_count,
-    get_default_args,
-    get_success_notification_operator,
-)
+from ala.ala_helper import step_bash_cmd, get_dr_count, get_default_args, get_success_notification_operator
 
 DAG_ID = "Preingest_datasets"
 
@@ -48,10 +43,7 @@ def setup_cluster(datasetIds, inst_type, extra_args, run_id_path, **kwargs):
         log.info(f"Number of records in dr is dr_count={max_dr_count}")
     log.info(f"instanceType is set to {instance_type}")
     emr_config = cluster_setup.get_pre_ingestion_cluster(
-        DAG_ID,
-        instance_type=instance_type,
-        name=f"Preingestion {display_drs}",
-        drs=datasetIds,
+        DAG_ID, instance_type=instance_type, name=f"Preingestion {display_drs}", drs=datasetIds
     )
 
     log.info(f"emr_config is configured as {emr_config}")
@@ -122,14 +114,10 @@ with DAG(
                 current_time = datetime.now()
                 str_timestamp = current_time.strftime("%Y%m%dT%H%M%S")
                 run_id = f".{uid}-{str_timestamp}"
-                run_id_path = (
-                    f"s3://{ala_config.S3_BUCKET_AVRO}/preingestion-report/{run_id}"
-                )
+                run_id_path = f"s3://{ala_config.S3_BUCKET_AVRO}/preingestion-report/{run_id}"
         kwargs["ti"].xcom_push(key="run_id_path", value=run_id_path)
 
-    get_report_name = PythonOperator(
-        task_id="get_report_name", python_callable=get_report_name, provide_context=True
-    )
+    get_report_name = PythonOperator(task_id="get_report_name", python_callable=get_report_name, provide_context=True)
 
     cluster_creator = PythonOperator(
         task_id="setup_cluster",
@@ -175,27 +163,15 @@ with DAG(
 
             s3 = boto3.resource("s3")
             path_result = urlparse(run_id_path)
-            report_path = (
-                path_result.path[1:]
-                if path_result.path.startswith("/")
-                else path_result.path
-            )
-            dr_list_str = (
-                s3.Object(path_result.hostname, report_path)
-                .get()["Body"]
-                .read()
-                .decode("utf-8")
-            )
+            report_path = path_result.path[1:] if path_result.path.startswith("/") else path_result.path
+            dr_list_str = s3.Object(path_result.hostname, report_path).get()["Body"].read().decode("utf-8")
             log.info(f"DR list: {dr_list_str}")
             kwargs["ti"].xcom_push(key="datasets", value=dr_list_str)
         else:
             kwargs["ti"].xcom_push(key="datasets", value=datasetIds)
 
     get_datasets = PythonOperator(
-        task_id="get_datasets",
-        python_callable=get_datasets,
-        provide_context=True,
-        trigger_rule=TriggerRule.ALL_SUCCESS,
+        task_id="get_datasets", python_callable=get_datasets, provide_context=True, trigger_rule=TriggerRule.ALL_SUCCESS
     )
 
     def check_for_batching(**kwargs):
@@ -207,9 +183,7 @@ with DAG(
             log.info("No datasets to ingest, skipping ingest dataset")
             return "skip_ingest"
         elif len(dataset_list) > ala_config.MIN_DRS_PER_BATCH:
-            log.info(
-                f"Found {len(dataset_list)} datasets for ingestion, processing in batches"
-            )
+            log.info(f"Found {len(dataset_list)} datasets for ingestion, processing in batches")
             return "ingest_batch"
         else:
             return "ingest_datasets"
@@ -223,13 +197,9 @@ with DAG(
         trigger_rule=TriggerRule.ALL_SUCCESS,
     )
 
-    skip_ingest = EmptyOperator(
-        task_id="skip_ingest", trigger_rule=TriggerRule.ALL_SUCCESS
-    )
+    skip_ingest = EmptyOperator(task_id="skip_ingest", trigger_rule=TriggerRule.ALL_SUCCESS)
 
-    ingest_batch = EmptyOperator(
-        task_id="ingest_batch", trigger_rule=TriggerRule.ALL_SUCCESS
-    )
+    ingest_batch = EmptyOperator(task_id="ingest_batch", trigger_rule=TriggerRule.ALL_SUCCESS)
 
     ingest_datasets = TriggerDagRunOperator(
         task_id="ingest_datasets",
@@ -241,6 +211,7 @@ with DAG(
             "load_images": f"{load_images}",
             "override_uuid_percentage_check": override_uuid_percentage_check,
             "skip_collectory_download": "true",
+            "run_indexing": "false",
         },
     )
 
@@ -253,11 +224,7 @@ with DAG(
 
             s3 = boto3.resource("s3")
             path_result = urlparse(run_id_path)
-            report_path = (
-                path_result.path[1:]
-                if path_result.path.startswith("/")
-                else path_result.path
-            )
+            report_path = path_result.path[1:] if path_result.path.startswith("/") else path_result.path
             s3.Object(path_result.hostname, report_path).delete()
             log.info(f"Run id deleted {run_id_path}")
 
@@ -278,17 +245,14 @@ with DAG(
             import math
 
             no_of_dataset_batches = min(
-                math.ceil(len(dataset_list) / ala_config.MIN_DRS_PER_BATCH),
-                ala_config.NO_OF_DATASET_BATCHES,
+                math.ceil(len(dataset_list) / ala_config.MIN_DRS_PER_BATCH), ala_config.NO_OF_DATASET_BATCHES
             )
             for idx, dataset in enumerate(dataset_list):
                 batch = idx % no_of_dataset_batches
                 dataset_batches[batch] = dataset + " " + dataset_batches[batch]
 
             for batch_no in range(ala_config.NO_OF_DATASET_BATCHES):
-                kwargs["ti"].xcom_push(
-                    key=f"batch{str(batch_no)}", value=dataset_batches[batch_no]
-                )
+                kwargs["ti"].xcom_push(key=f"batch{str(batch_no)}", value=dataset_batches[batch_no])
 
         create_batches = PythonOperator(
             task_id="create_batches",
@@ -317,16 +281,12 @@ with DAG(
             )
 
         check_ingest_batches = EmptyOperator(
-            task_id="check_ingest_batches",
-            trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
+            task_id="check_ingest_batches", trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
         )
 
         (
             create_batches
-            >> [
-                generate_task(batch)
-                for batch in range(ala_config.NO_OF_DATASET_BATCHES)
-            ]
+            >> [generate_task(batch) for batch in range(ala_config.NO_OF_DATASET_BATCHES)]
             >> check_ingest_batches
         )
 
