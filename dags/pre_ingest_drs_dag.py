@@ -14,7 +14,14 @@ from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
 from datetime import datetime, timedelta
 from airflow.utils.dates import days_ago
 from ala import ala_config, cluster_setup
-from ala.ala_helper import step_bash_cmd, get_dr_count, get_default_args, get_success_notification_operator
+from ala.ala_helper import (
+    step_bash_cmd,
+    get_dr_count,
+    get_default_args,
+    get_success_notification_operator,
+    get_metadata_as_json,
+    update_registry_metadata,
+)
 
 DAG_ID = "Preingest_datasets"
 
@@ -149,6 +156,43 @@ with DAG(
         task_id="wait_for_cluster_termination",
         job_flow_id="{{ task_instance.xcom_pull('setup_cluster', key='job_flow_id') }}",
         aws_conn_id="aws_default",
+    )
+
+    def update_checked_date(**kwargs):
+        from ala.ala_helper import enable_debugpy
+
+        enable_debugpy()
+
+        def update_last_checked(dr_uid):
+            try:
+                update_registry_metadata(
+                    ala_config.COLLECTORY_SERVER,
+                    dr_uid,
+                    ala_config.ALA_API_KEY,
+                    {'lastChecked': datetime.now().strftime("%Y-%m-%dT%H:%M:%S")},
+                )
+                log.info(f"Updated lastChecked for dr {uid}")
+            except Exception as e:
+                log.error(f"Error updating lastChecked for dr {dr_uid}: {e}")
+
+        datasetIds = kwargs["dag_run"].conf["datasetIds"]
+        log.info("update_checked_date uids: %s", datasetIds)
+
+        for uid in datasetIds.split():
+            if uid.startswith("dr"):
+                update_last_checked(uid)
+
+            elif uid.startswith("dp"):
+                md_json = get_metadata_as_json(ala_config.COLLECTORY_SERVER, uid, ala_config.ALA_API_KEY)
+                log.info(f"Going to update lastChecked for data resources in dp {uid}")
+                for dr in md_json.get("dataResources", []):
+                    update_last_checked(dr['uid'])
+
+    update_checked_date_task = PythonOperator(
+        task_id="update_checked_date",
+        python_callable=update_checked_date,
+        provide_context=True,
+        trigger_rule=TriggerRule.ALL_SUCCESS,
     )
 
     def get_datasets(**kwargs):
@@ -292,6 +336,7 @@ with DAG(
 
     (
         get_report_name
+        >> update_checked_date_task
         >> cluster_creator
         >> preingest_drs
         >> step_checker

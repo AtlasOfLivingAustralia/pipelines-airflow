@@ -54,7 +54,7 @@ def join_url(*url_fragments: str) -> str:
     return "/".join(fragment.strip("/") for fragment in url_fragments)
 
 
-def json_parse(base_url: str, url_path: str, params=None, headers=None):
+def json_parse(base_url: str, url_path: str, params=None, headers=None, method="GET"):
     """
     Calls the specified URL and returns the JSON response.
     :param base_url: like https://collections.ala.org.au/ws
@@ -65,10 +65,15 @@ def json_parse(base_url: str, url_path: str, params=None, headers=None):
 
     try:
         full_url = join_url(base_url, url_path)
-        with requests.get(full_url, params, headers=headers, timeout=60) as response:
-            response.raise_for_status()
-            json_result = json.loads(response.content)
-            return json_result
+        if method == "GET":
+            with requests.get(full_url, params, headers=headers, timeout=60) as response:
+                response.raise_for_status()
+                json_result = json.loads(response.content)
+                return json_result
+        elif method == "POST":
+            with requests.post(full_url, json=params, headers=headers, timeout=60) as response:
+                response.raise_for_status()
+                return response.content
     except requests.exceptions.HTTPError as err:
         logging.error("Error encountered during request %s with params %s", full_url, params, exc_info=err)
         raise IOError(err)
@@ -741,6 +746,7 @@ def enable_debugpy():
         print("Debugger already connected")
     else:
         debugpy.listen(("0.0.0.0", 10001))
+        print("waiting for client to connect")
         debugpy.wait_for_client()
 
 
@@ -759,3 +765,60 @@ def get_assertion_records_count():
         requests.get(f"{ala_config.BIOCACHE_URL}/occurrence/search?q=userAssertions%3A*&pageSize=0", timeout=60).text
     )
     return records_with_assertions.get("totalRecords", 0)
+
+
+def get_metadata_as_json(registry_base_url, uid, ala_api_key):
+    """
+    Fetches metadata for a dataset from the registry (Collectory) using the API key.
+
+    Args:
+        dataset_uid (str): The unique identifier of the dataset.
+        registry_url (str): The URL of the registry (Collectory).
+        ala_api_key (str): The API key for authentication.
+
+    Returns:
+        dict: The metadata of the dataset, or an error message if not found.
+    """
+
+    if uid.startswith("dr"):
+        resource_path = f"dataResource/{uid}"
+    elif uid.startswith("dp"):
+        resource_path = f"dataProvider/{uid}"
+    else:
+        raise ValueError("Not a valid dataset or data provider uid: %s", uid)
+
+    try:
+        jresponse = json_parse(registry_base_url, resource_path, headers={"Authorization": ala_api_key})
+        return jresponse
+    except Exception as e:
+        print(f"Error fetching metadata for {uid}: {str(e)}")
+        return {"error": str(e)}
+
+
+def update_registry_metadata(registry_base_url, uid, ala_api_key, metadata):
+    """
+    Updates metadata for a dataset in the registry (Collectory) using the API key.
+
+    Args:
+        registry_base_url (str): The base URL of the registry (Collectory).
+        uid (str): The unique identifier of the dataset.
+        ala_api_key (str): The API key for authentication.
+        metadata (dict): The metadata to update.
+
+    Returns:
+        dict: The updated metadata of the dataset, or an error message if not found.
+    """
+    if uid.startswith("dr"):
+        resource_path = f"dataResource/{uid}"
+    elif uid.startswith("dp"):
+        resource_path = f"dataProvider/{uid}"
+    else:
+        raise ValueError("Not a valid dataset or data provider uid: %s", uid)
+
+    try:
+        jresponse = json_parse(
+            registry_base_url, resource_path, headers={"Authorization": ala_api_key}, method="POST", params=metadata
+        )
+        return jresponse
+    except Exception as e:
+        print(f"Error fetching metadata for {uid}: {str(e)}")
