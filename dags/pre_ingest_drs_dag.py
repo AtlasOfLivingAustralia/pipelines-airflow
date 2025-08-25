@@ -159,9 +159,6 @@ with DAG(
     )
 
     def update_checked_date(**kwargs):
-        from ala.ala_helper import enable_debugpy
-
-        enable_debugpy()
 
         def update_last_checked(dr_uid):
             try:
