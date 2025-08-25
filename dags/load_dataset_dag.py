@@ -15,7 +15,7 @@ from airflow.utils.trigger_rule import TriggerRule
 from botocore.exceptions import ClientError
 
 from ala import ala_config
-from ala.ala_helper import get_default_args, get_success_notification_operator
+from ala.ala_helper import get_default_args, get_success_notification_operator, get_metadata_as_json
 
 load_images = "{{ dag_run.conf['load_images'] }}"
 override_uuid_percentage_check = "{{ dag_run.conf['override_uuid_percentage_check'] }}"
@@ -68,30 +68,19 @@ with DAG(
         registry_url = kwargs["registry_url"]
 
         dataset_uid = kwargs["dag_run"].conf["datasetIds"]
-        resource_url = f"{registry_url}/dataResource/{dataset_uid}"
 
-        print("Opening: " + dataset_uid + " " + resource_url)
-        req = Request(resource_url)
-        req.add_header("Authorization", ala_api_key)
-        resp = urlopen(req)
-        data_resource_content = json.loads(resp.read().decode())
+        data_resource_content = get_metadata_as_json(registry_url, dataset_uid, ala_api_key)
 
         conn_params_debug = json.dumps(data_resource_content["connectionParameters"])
 
         print("Connection parameters: " + conn_params_debug)
         url_to_download = data_resource_content["connectionParameters"]["url"]
-        print(
-            "URL to download: " + data_resource_content["connectionParameters"]["url"]
-        )
+        print("URL to download: " + data_resource_content["connectionParameters"]["url"])
 
         if url_to_download.startswith("http"):
-            urllib.request.urlretrieve(
-                url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip"
-            )
+            urllib.request.urlretrieve(url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip")
             upload_file(
-                f"/tmp/{dataset_uid}.zip",
-                ala_config.S3_BUCKET_DWCA,
-                f"dwca-imports/{dataset_uid}/{dataset_uid}.zip",
+                f"/tmp/{dataset_uid}.zip", ala_config.S3_BUCKET_DWCA, f"dwca-imports/{dataset_uid}/{dataset_uid}.zip"
             )
             os.remove(f"/tmp/{dataset_uid}.zip")
         else:
@@ -109,15 +98,11 @@ with DAG(
         my_bucket = s3.Bucket(bucket)
         dataset_list = datasets_param.split()
         for dataset in dataset_list:
-            archive_files = my_bucket.objects.filter(
-                Prefix=f"dwca-imports/{dataset}/{dataset}.zip"
-            )
+            archive_files = my_bucket.objects.filter(Prefix=f"dwca-imports/{dataset}/{dataset}.zip")
             for archive_file in archive_files:
                 datasets[dataset] = archive_file.size
                 print(f"{dataset} = {archive_file.size}")
-        datasets = dict(
-            sorted(datasets.items(), key=lambda item: item[1], reverse=True)
-        )
+        datasets = dict(sorted(datasets.items(), key=lambda item: item[1], reverse=True))
         return datasets
 
     def list_small_datasets(**kwargs):
@@ -134,9 +119,7 @@ with DAG(
     def list_large_datasets(**kwargs):
         ti = kwargs["ti"]
         datasets = ti.xcom_pull(task_ids="get_dataset_list")
-        large_datasets = dict(
-            (k, v) for k, v in datasets.items() if (5000000 < v < 5000000000)
-        )
+        large_datasets = dict((k, v) for k, v in datasets.items() if (5000000 < v < 5000000000))
         kwargs["ti"].xcom_push(key="process_large", value=large_datasets)
         dataset_list = " ".join(large_datasets.keys()).strip()
         print("Large datasets to process " + dataset_list)
@@ -177,22 +160,12 @@ with DAG(
         python_callable=get_dataset_size_list,
     )
 
-    process_small = PythonOperator(
-        task_id="process_small",
-        provide_context=True,
-        python_callable=list_small_datasets,
-    )
+    process_small = PythonOperator(task_id="process_small", provide_context=True, python_callable=list_small_datasets)
 
-    process_large = PythonOperator(
-        task_id="process_large",
-        provide_context=True,
-        python_callable=list_large_datasets,
-    )
+    process_large = PythonOperator(task_id="process_large", provide_context=True, python_callable=list_large_datasets)
 
     process_xlarge = PythonOperator(
-        task_id="process_xlarge",
-        provide_context=True,
-        python_callable=list_xlarge_datasets,
+        task_id="process_xlarge", provide_context=True, python_callable=list_xlarge_datasets
     )
 
     ingest_small_datasets_task = TriggerDagRunOperator(
@@ -234,11 +207,7 @@ with DAG(
         },
     )
 
-    (
-        refresh_archive
-        >> get_dataset_list
-        >> [process_large, process_small, process_xlarge]
-    )
+    (refresh_archive >> get_dataset_list >> [process_large, process_small, process_xlarge])
     process_small >> ingest_small_datasets_task
     process_large >> ingest_large_datasets_task
     process_xlarge >> ingest_xlarge_datasets_task
