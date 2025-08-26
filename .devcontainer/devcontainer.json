@@ -9,8 +9,9 @@
     "service": "airflow-scheduler",
     "workspaceFolder": "/opt/airflow",
 	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-
+	"features": {
+		"ghcr.io/devcontainers/features/aws-cli:1": {}
+	},
 	// add a port forwarding for solr to hosts localhost
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
