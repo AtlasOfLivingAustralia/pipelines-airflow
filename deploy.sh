@@ -15,11 +15,11 @@ TS=$(date +%Y%m%d-%H%M%S)
 # Check if preingestion directory exists in the bucket
 if aws s3 ls "s3://$S3_BUCKET/airflow/dags/" > /dev/null 2>&1; then
   echo "Renaming existing airflow/dag directory to airflow/dag_$TS ..."
-  aws s3 mv "s3://$S3_BUCKET/airflow/dags/" "s3://$S3_BUCKET/airflow/dags/$TS/" --recursive
+  aws s3 mv "s3://$S3_BUCKET/airflow/dags/" "s3://$S3_BUCKET/airflow/dags_$TS/" --recursive
 fi
 
 echo "Copying local dags directory to s3://$S3_BUCKET/airflow/dags/ ..."
-aws s3 cp ./ "s3://$S3_BUCKET/airflow/dags/" \
+aws s3 cp ./dags/ "s3://$S3_BUCKET/airflow/dags/" \
   --recursive \
   --include "*.*" \
   --exclude "*__pycache__" \
@@ -32,6 +32,8 @@ aws s3 cp ./ "s3://$S3_BUCKET/airflow/dags/" \
   --exclude "*.log" \
   --exclude "tests*" \
   --exclude "temps*" \
+  --exclude "logs/*" \
+  --exclude "webserver_config.py" \
   --exclude ".idea"
 
 echo "Deploy complete."
