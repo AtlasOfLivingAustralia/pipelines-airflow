@@ -1,10 +1,9 @@
-from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator
-from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator
-from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
-from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
-from ala import ala_config
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
+
+from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator, EmrCreateJobFlowOperator
+from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor, EmrStepSensor
+from ala import ala_config
 from ala.ala_helper import get_success_notification_operator
 
 
@@ -156,7 +155,7 @@ class EMRConfig:
 
     @property
     def Name(self) -> str:
-        return f"{self.name} [{get_environment().upper()}]"
+        return f"{self.name} [{ala_config.ENVIRONMENT_TYPE.upper()}]"
 
     @property
     def LogUri(self) -> str:
