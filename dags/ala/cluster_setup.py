@@ -1,10 +1,19 @@
 import re
 from dataclasses import dataclass, field
 
+from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator, EmrCreateJobFlowOperator
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor, EmrStepSensor
 from ala import ala_config
-from ala.ala_helper import get_success_notification_operator
+from ala.ala_helper import get_success_notification_operator, get_dr_count, step_bash_cmd
+import logging as log
+from enum import Enum
+
+
+class ClusterType(Enum):
+    PREINGESTION = "Preingestion"
+    PIPELINES_SMALL = "Pipelines local"
+    PIPELINES_LARGE = "Pipelines cluster"
 
 
 def run_large_emr(
@@ -31,14 +40,18 @@ def run_large_emr(
     Returns:
         None: The function defines task dependencies within the DAG but does not return a value.
     """
-    cluster_creator = EmrCreateJobFlowOperator(
-        dag=dag,
+
+    cluster_creator = PythonOperator(
         task_id="create_emr_cluster",
-        emr_conn_id="emr_default",
-        job_flow_overrides=get_large_cluster(
-            dag.dag_id, bootstrap_script, ebs_size_in_gb=ebs_size_in_gb, cluster_size=cluster_size
-        ),
-        aws_conn_id="aws_default",
+        python_callable=setup_cluster,
+        op_kwargs={
+            'dag_id': dag.dag_id,
+            "dataset_ids": "ALL",
+            "inst_type": "None",
+            "cluster_type": ClusterType.PIPELINES_LARGE,
+            "bootstrap_script": bootstrap_script,
+        },
+        provide_context=True,
     )
 
     step_adder = EmrAddStepsOperator(
@@ -230,6 +243,7 @@ class PreIngestionEMRConfig(EMRConfig):
         super().__post_init__()
         self.Tags += [{"Key": "product", "Value": "preingestion"}]
         self.Tags += [{"Key": "emrcluster", "Value": "single node"}]
+        self.Tags += [{"Key": "operation", "Value": "preingestion"}]
 
 
 @dataclass
@@ -244,7 +258,8 @@ class PipelinesEMRConfig(EMRConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        self.Tags = self.Tags + [{"Key": "product", "Value": "pipeline"}]
+        self.Tags += [{"Key": "product", "Value": "pipeline"}]
+        self.Tags += [{"Key": "operation", "Value": self.dag_id}]
 
 
 @dataclass
@@ -435,3 +450,61 @@ def get_large_cluster(
             data_resources=drs,
         )
     )
+
+
+def setup_cluster(dag_id, dataset_ids, cluster_type: ClusterType, inst_type, **kwargs):
+    """
+    Sets up an EMR cluster for pre-ingestion processing based on the provided dataset IDs and instance type.
+
+    Parameters:
+        dag_id (str): The DAG identifier for the Airflow workflow.
+        dataset_ids (str): A whitespace-separated string of dataset IDs to be processed.
+        inst_type (str): The EC2 instance type to use for the cluster. If set to "None", the instance type is determined based on dataset record counts.
+        **kwargs: Additional keyword arguments passed from Airflow context, including task instance (ti) for XCom operations.
+
+    Behavior:
+        - Logs the dataset IDs and determines a display string for logging.
+        - If inst_type is "None", calculates the maximum record count among datasets and selects an appropriate EC2 instance type.
+        - Configures the EMR cluster using `get_pre_ingestion_cluster`.
+        - Creates the EMR cluster using `EmrCreateJobFlowOperator` and pushes the resulting job flow ID to XCom.
+
+    Returns:
+        None. The function executes the EMR cluster creation and pushes the job flow ID to XCom.
+    """
+    log.info("DatasetIds are: %s", dataset_ids)
+    dataset_list = dataset_ids.split()
+    if len(dataset_list) > 20:
+        display_drs = ",".join(dataset_list[:20]) + "..."
+    else:
+        display_drs = ",".join(dataset_list)
+
+    instance_type = inst_type
+    if instance_type == "None":
+        rec_count_list = [get_dr_count(dr) for dr in dataset_list]
+        max_dr_count = max(rec_count_list)
+        instance_type = ala_config.EC2_SMALL_INSTANCE_TYPE
+        if max_dr_count > ala_config.DR_REC_COUNT_THRESHOLD:
+            instance_type = ala_config.EC2_XLARGE_INSTANCE_TYPE
+        log.info("Number of records in dr is dr_count=%s", max_dr_count)
+    log.info("instanceType is set to %s", instance_type)
+
+    if cluster_type == ClusterType.PREINGESTION:
+        emr_config = get_pre_ingestion_cluster(
+            dag_id, instance_type=instance_type, name=f"{cluster_type} {display_drs}", drs=dataset_ids
+        )
+    elif cluster_type == ClusterType.PIPELINES_SMALL:
+        emr_config = get_small_cluster(dag_id, bootstrap_actions_script=kwargs.get("bootstrap_script"), drs=dataset_ids)
+    else:
+        emr_config = get_large_cluster(dag_id, bootstrap_actions_script=kwargs.get("bootstrap_script"), drs=dataset_ids)
+
+    log.info("emr_config is configured as %s", emr_config)
+
+    result = EmrCreateJobFlowOperator(
+        task_id="create_emr_cluster",
+        emr_conn_id="emr_default",
+        job_flow_overrides=emr_config,
+        aws_conn_id="aws_default",
+        do_xcom_push=True,
+    ).execute(kwargs)
+    kwargs["ti"].xcom_push(key="job_flow_id", value=result)
+    return result

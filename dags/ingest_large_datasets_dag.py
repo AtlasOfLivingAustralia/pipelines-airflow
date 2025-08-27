@@ -16,6 +16,7 @@ from ala import cluster_setup, ala_config
 from ala.ala_helper import step_bash_cmd, get_default_args, get_success_notification_operator
 
 DAG_ID = "Ingest_large_datasets"
+datasetIds = "{{ dag_run.conf['datasetIds'] }}"
 
 
 def get_dwca_steps(dataset_list):
@@ -141,14 +142,17 @@ with DAG(
         python_callable=construct_steps_with_options,
     )
 
-    cluster_creator = EmrCreateJobFlowOperator(
-        dag=dag,
+    cluster_creator = PythonOperator(
         task_id="create_emr_cluster",
-        emr_conn_id="emr_default",
-        job_flow_overrides=cluster_setup.get_large_cluster(
-            DAG_ID, "bootstrap-ingest-large-actions.sh", drs="{{ dag_run.conf['datasetIds'] }}"
-        ),
-        aws_conn_id="aws_default",
+        python_callable=cluster_setup.setup_cluster,
+        op_kwargs={
+            'dag_id': DAG_ID,
+            "dataset_ids": datasetIds,
+            "inst_type": "None",
+            "cluster_type": cluster_setup.ClusterType.PIPELINES_LARGE,
+            "bootstrap_script": "bootstrap-ingest-large-actions.sh",
+        },
+        provide_context=True,
     )
 
     step_adder = EmrAddStepsOperator(

@@ -23,6 +23,7 @@ from requests_oauth2client import OAuth2Client, BearerAuth
 import requests
 
 DAG_ID = "Export_event_core"
+datasetIds = "{{ dag_run.conf['datasetId'] }}"
 
 
 def get_spark_steps(dataset_list, request_id, search_query):
@@ -340,14 +341,17 @@ with DAG(
         dag=dag,
     )
 
-    cluster_creator = EmrCreateJobFlowOperator(
-        dag=dag,
+    cluster_creator = PythonOperator(
         task_id="create_emr_cluster",
-        emr_conn_id="emr_default",
-        job_flow_overrides=cluster_setup.get_large_cluster(
-            DAG_ID, "bootstrap-export-event-core-actions.sh", drs="{{ dag_run.conf['datasetId'] }}"
-        ),
-        aws_conn_id="aws_default",
+        python_callable=cluster_setup.setup_cluster,
+        op_kwargs={
+            'dag_id': DAG_ID,
+            "dataset_ids": datasetIds,
+            "inst_type": "None",
+            "cluster_type": cluster_setup.ClusterType.PIPELINES_LARGE,
+            "bootstrap_script": "bootstrap-export-event-core-actions.sh",
+        },
+        provide_context=True,
     )
 
     step_adder = EmrAddStepsOperator(

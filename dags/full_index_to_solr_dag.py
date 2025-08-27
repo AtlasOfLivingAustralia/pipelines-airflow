@@ -341,12 +341,17 @@ with DAG(
             python_callable=construct_full_index_steps,
         )
 
-        cluster_creator_task = EmrCreateJobFlowOperator(
-            dag=dag,
+        cluster_creator_task = PythonOperator(
             task_id="create_emr_cluster",
-            emr_conn_id="emr_default",
-            job_flow_overrides=cluster_setup.get_large_cluster(DAG_ID, "bootstrap-index-actions.sh", drs="ALL"),
-            aws_conn_id="aws_default",
+            python_callable=cluster_setup.setup_cluster,
+            op_kwargs={
+                'dag_id': DAG_ID,
+                "dataset_ids": "ALL",
+                "inst_type": "None",
+                "cluster_type": cluster_setup.ClusterType.PIPELINES_LARGE,
+                "bootstrap_script": "bootstrap-index-actions.sh",
+            },
+            provide_context=True,
         )
 
         step_adder_task = EmrAddStepsOperator(

@@ -13,6 +13,7 @@ USER_DETAILS_ENDPOINT = Variable.get("user_details_endpoint")
 ALERT_EMAIL = Variable.get("alert_email")
 BACKUP_LOCATION = Variable.get("s3_bucket_backup")
 BIOCACHE_URL = Variable.get("biocache_url")
+BIOCACHE_WS = BIOCACHE_URL
 COLLECTORY_SERVER = Variable.get("registry_url")
 DASHBOARD_CACHE_CLEAR_URL = Variable.get("dashboard_cache_clear_url")
 DOI_URL = Variable.get("doi_url")

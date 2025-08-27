@@ -32,31 +32,12 @@ extra_args = "{{ dag_run.conf['extra_args'] }}"
 override_uuid_percentage_check = "{{ dag_run.conf['override_uuid_percentage_check'] }}"
 
 
-def setup_cluster(datasetIds, inst_type, extra_args, run_id_path, **kwargs):
-    log.info(f"DatasetIds are: {datasetIds}")
-    dataset_list = datasetIds.split()
-    if len(dataset_list) > 20:
-        display_drs = ",".join(dataset_list[:20]) + "..."
-    else:
-        display_drs = ",".join(dataset_list)
-
-    instance_type = inst_type
-    if instance_type == "None":
-        rec_count_list = [get_dr_count(dr) for dr in dataset_list]
-        max_dr_count = max(rec_count_list)
-        instance_type = ala_config.EC2_SMALL_INSTANCE_TYPE
-        if max_dr_count > ala_config.DR_REC_COUNT_THRESHOLD:
-            instance_type = ala_config.EC2_XLARGE_INSTANCE_TYPE
-        log.info(f"Number of records in dr is dr_count={max_dr_count}")
-    log.info(f"instanceType is set to {instance_type}")
-    emr_config = cluster_setup.get_pre_ingestion_cluster(
-        DAG_ID, instance_type=instance_type, name=f"Preingestion {display_drs}", drs=datasetIds
+def setup_cluster_init(datasetIds, inst_type, extra_args, run_id_path, **kwargs):
+    cluster_setup.setup_cluster(
+        dag_id=DAG_ID, dataset_ids=datasetIds, cluster_type="Preingestion", inst_type=inst_type, **kwargs
     )
-
-    log.info(f"emr_config is configured as {emr_config}")
-
     steps = []
-    for dr in dataset_list:
+    for dr in datasetIds.split():
         dwca_loc = f"/data/dmgt"
         hdfs_s3_dwca_loc = f"s3://{ala_config.S3_BUCKET_DWCA}/dwca-imports"
         steps.extend(
@@ -77,15 +58,6 @@ def setup_cluster(datasetIds, inst_type, extra_args, run_id_path, **kwargs):
                 )
             ]
         )
-
-    result = EmrCreateJobFlowOperator(
-        task_id="create_emr_cluster",
-        emr_conn_id="emr_default",
-        job_flow_overrides=emr_config,
-        aws_conn_id="aws_default",
-        do_xcom_push=True,
-    ).execute(kwargs)
-    kwargs["ti"].xcom_push(key="job_flow_id", value=result)
     kwargs["ti"].xcom_push(key="steps", value=steps)
 
 
@@ -128,7 +100,7 @@ with DAG(
 
     cluster_creator = PythonOperator(
         task_id="setup_cluster",
-        python_callable=setup_cluster,
+        python_callable=setup_cluster_init,
         op_kwargs={
             "datasetIds": datasetIds,
             "inst_type": instanceType,
