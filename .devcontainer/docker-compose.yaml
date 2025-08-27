@@ -66,6 +66,9 @@ x-airflow-common:
     AIRFLOW__CORE__PARALLELISM: 10
     AIRFLOW__CORE__TEST_CONNECTION: 'Enabled'
     AIRFLOW__CELERY__WORKER_CONCURRENCY: 10
+    AWS_SHARED_CREDENTIALS_FILE: ~/.aws/credentials
+    AWS_CONFIG_FILE: ~/.aws/config
+    AWS_DEFAULT_REGION: ap-southeast-2
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
