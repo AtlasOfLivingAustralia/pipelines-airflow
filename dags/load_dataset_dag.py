@@ -178,6 +178,7 @@ with DAG(
             "skip_dwca_to_verbatim": "false",
             "load_images": f"{load_images}",
             "override_uuid_percentage_check": override_uuid_percentage_check,
+            "run_indexing": "false",
         },
     )
 
@@ -191,6 +192,7 @@ with DAG(
             "skip_dwca_to_verbatim": "false",
             "load_images": f"{load_images}",
             "override_uuid_percentage_check": override_uuid_percentage_check,
+            "run_indexing": "false",
         },
     )
 
@@ -204,6 +206,7 @@ with DAG(
             "skip_dwca_to_verbatim": "false",
             "load_images": f"{load_images}",
             "override_uuid_percentage_check": override_uuid_percentage_check,
+            "run_indexing": "false",
         },
     )
 
