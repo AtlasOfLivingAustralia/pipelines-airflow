@@ -34,7 +34,11 @@ override_uuid_percentage_check = "{{ dag_run.conf['override_uuid_percentage_chec
 
 def setup_cluster_init(datasetIds, inst_type, extra_args, run_id_path, **kwargs):
     cluster_setup.setup_cluster(
-        dag_id=DAG_ID, dataset_ids=datasetIds, cluster_type="Preingestion", inst_type=inst_type, **kwargs
+        dag_id=DAG_ID,
+        dataset_ids=datasetIds,
+        cluster_type=cluster_setup.ClusterType.PREINGESTION,
+        inst_type=inst_type,
+        **kwargs,
     )
     steps = []
     for dr in datasetIds.split():

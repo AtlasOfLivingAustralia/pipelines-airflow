@@ -1,13 +1,13 @@
+import logging as log
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 
 from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator, EmrCreateJobFlowOperator
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor, EmrStepSensor
 from ala import ala_config
-from ala.ala_helper import get_success_notification_operator, get_dr_count, step_bash_cmd
-import logging as log
-from enum import Enum
+from ala.ala_helper import get_dr_count, get_success_notification_operator, step_bash_cmd
 
 
 class ClusterType(Enum):
@@ -490,7 +490,7 @@ def setup_cluster(dag_id, dataset_ids, cluster_type: ClusterType, inst_type, **k
 
     if cluster_type == ClusterType.PREINGESTION:
         emr_config = get_pre_ingestion_cluster(
-            dag_id, instance_type=instance_type, name=f"{cluster_type} {display_drs}", drs=dataset_ids
+            dag_id, instance_type=instance_type, name=f"Preingest {display_drs}", drs=dataset_ids
         )
     elif cluster_type == ClusterType.PIPELINES_SMALL:
         emr_config = get_small_cluster(dag_id, bootstrap_actions_script=kwargs.get("bootstrap_script"), drs=dataset_ids)
