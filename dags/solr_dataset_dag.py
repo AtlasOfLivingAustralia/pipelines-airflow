@@ -10,9 +10,18 @@ datasetId = "{{ dag_run.conf['datasetId'] }}"
 curlDeleteDataset = f"{ala_config.SOLR_URL}/{ala_config.SOLR_COLLECTION}/update?commit=true"
 
 SPARK_STEPS = [
-    s3_cp("a. Copy IndexRecord to S3", f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets/index-record/" + datasetId, "hdfs:///pipelines-all-datasets/index-record/" + datasetId),
-    step_bash_cmd("b. Delete dataset from SOLR", " sudo -u hadoop curl \"" + curlDeleteDataset + f"\" -H \"Content-Type: text/xml\"  --data-binary '<delete><query>dataResourceUid:{datasetId}</query></delete>'"),
-    step_bash_cmd("c. SOLR indexing", f" la-pipelines solr {datasetId} --cluster")
+    s3_cp(
+        "a. Copy IndexRecord to S3",
+        f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets/index-record/" + datasetId,
+        "hdfs:///pipelines-all-datasets/index-record/" + datasetId,
+    ),
+    step_bash_cmd(
+        "b. Delete dataset from SOLR",
+        " sudo -u hadoop curl \""
+        + curlDeleteDataset
+        + f"\" -H \"Content-Type: text/xml\"  --data-binary '<delete><query>dataResourceUid:{datasetId}</query></delete>'",
+    ),
+    step_bash_cmd("c. SOLR indexing", f" la-pipelines solr {datasetId} --cluster"),
 ]
 
 with DAG(
@@ -23,6 +32,6 @@ with DAG(
     start_date=days_ago(1),
     schedule_interval=None,
     params={"datasetId": "dr1010"},
-    tags=['emr', 'single-datasets']
+    tags=['emr', 'single-datasets'],
 ) as dag:
-    cluster_setup.run_large_emr(dag, SPARK_STEPS, "bootstrap-index-actions.sh")
+    cluster_setup.run_large_emr(dag, SPARK_STEPS, "bootstrap-index-actions.sh", dataset_ids=datasetId)

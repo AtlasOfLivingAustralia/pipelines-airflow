@@ -4,10 +4,17 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from airflow.operators.python import PythonOperator
-from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator, EmrCreateJobFlowOperator
+from airflow.providers.amazon.aws.operators.emr import (
+    EmrAddStepsOperator,
+    EmrCreateJobFlowOperator,
+)
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor, EmrStepSensor
 from ala import ala_config
-from ala.ala_helper import get_dr_count, get_success_notification_operator, step_bash_cmd
+from ala.ala_helper import (
+    get_dr_count,
+    get_success_notification_operator,
+    step_bash_cmd,
+)
 
 
 class ClusterType(Enum):
@@ -22,6 +29,7 @@ def run_large_emr(
     bootstrap_script,
     ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB,
     cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT,
+    dataset_ids='ALL',
 ):
     """
     Creates and manages an AWS EMR cluster workflow within an Airflow DAG.
@@ -46,7 +54,7 @@ def run_large_emr(
         python_callable=setup_cluster,
         op_kwargs={
             'dag_id': dag.dag_id,
-            "dataset_ids": "ALL",
+            "dataset_ids": dataset_ids,
             "inst_type": "None",
             "cluster_type": ClusterType.PIPELINES_LARGE,
             "bootstrap_script": bootstrap_script,
