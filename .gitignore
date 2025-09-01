@@ -12,3 +12,4 @@ webserver_config.py
 airflow-webserver.pid
 airflow.db
 .command-history/.bash_hist
+.env
