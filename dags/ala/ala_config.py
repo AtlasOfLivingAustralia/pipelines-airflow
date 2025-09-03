@@ -71,6 +71,11 @@ SOLR_CONFIGSET = Variable.get("solr_configset")
 SOLR_URL = Variable.get("solr_url")
 SOLR_REPLICATION_FACTOR = Variable.get("solr_collection_rf")
 SPARK_PROPERTIES = json.loads(Variable.get("spark_properties"))
+SPARK_SUBMIT_ARGS = Variable.get("spark_submit_args",
+                                "--num-executors=8 "
+                                 "--executor-cores=8 "
+                                 "--executor-memory=18G "
+                                 "--driver-memory=2G")
 ZK_URL = Variable.get("zk_url")
 
 EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get("ec2_additional_master_security_groups").split(",")
