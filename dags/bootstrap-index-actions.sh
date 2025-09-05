@@ -25,7 +25,7 @@ sudo aws s3 cp s3://$S3_BUCKET/la-pipelines.jar  /usr/share/la-pipelines/la-pipe
 sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/solr_cleanup.py /tmp/solr_cleanup.py
 
 # ES schema
-sudo aws s3 cp s3://$S3_BUCKET/es-event-core-schema.json /tmp/es-event-core-schema.json
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/es-event-core-schema.json /tmp/es-event-core-schema.json
 
 # set up la-pipeline script
 sudo wget https://github.com/mikefarah/yq/releases/download/v4.16.1/yq_linux_arm64.tar.gz -O - | tar xz
