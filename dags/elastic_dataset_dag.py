@@ -30,5 +30,5 @@ with DAG(
     params={"datasetId": "dr18388"},
 ) as dag:
     cluster_setup.run_large_emr(
-        dag, SPARK_STEPS, "bootstrap-index-actions.sh", cluster_size=4, dataset_ids=dataset_list
+        dag, SPARK_STEPS, "bootstrap-event-core-actions.sh", cluster_size=4, dataset_ids=dataset_list
     )

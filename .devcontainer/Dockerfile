@@ -4,7 +4,7 @@ USER root
 
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    default-jdk file git-all \
+    default-jdk file git-all python3-venv python3-pip python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Ensure the 'airflow' group exists and set /opt/airflow as the home directory
