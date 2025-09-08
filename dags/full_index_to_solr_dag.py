@@ -411,7 +411,7 @@ with DAG(
         op_kwargs={"url": ala_config.DASHBOARD_CACHE_CLEAR_URL},
     )
 
-    check_image_sync_flag >> asserted_records_count_task >> [image_sync, full_index_to_solr]
+    asserted_records_count_task >> check_image_sync_flag >> [image_sync, full_index_to_solr]
     (image_sync >> get_drs_for_image_sync_index >> check_image_sync_count >> [full_index_to_solr, image_sync_batch])
     image_sync_batch >> image_sync_batch_task_grp >> full_index_to_solr
     full_index_to_solr >> full_index_to_solr_task_grp
