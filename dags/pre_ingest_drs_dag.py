@@ -144,7 +144,7 @@ with DAG(
                     ala_config.ALA_API_KEY,
                     {'lastChecked': datetime.now().strftime("%Y-%m-%dT%H:%M:%S")},
                 )
-                log.info(f"Updated lastChecked for dr {uid}")
+                log.info(f"Updated lastChecked for dr {dr_uid}")
             except Exception as e:
                 log.error(f"Error updating lastChecked for dr {dr_uid}: {e}")
 
