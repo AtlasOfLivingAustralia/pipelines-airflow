@@ -40,18 +40,44 @@ def taskflow():
         context = get_current_context()
         pre_sync_count = int(context["params"]["pre_sync_count"])
 
+        def check_count_change(cnt, MAX_COUNT, SLEEP_TIME, prev_records_with_assertions_count):
+            retries = 1
+            MAX_RETRIES = 2
+            while cnt <= MAX_COUNT:
+                time.sleep(SLEEP_TIME)
+                records_with_assertions_count = ala_helper.get_assertion_records_count()
+                print(f"Solr still committing, number of records with assertions:{records_with_assertions_count}")
+                if records_with_assertions_count != prev_records_with_assertions_count:
+                    print(
+                        f"Number of records with assertions changed from {prev_records_with_assertions_count} to {records_with_assertions_count}"
+                    )
+                    prev_records_with_assertions_count = records_with_assertions_count
+                    retries = 1
+                elif retries == MAX_RETRIES:
+                    print(
+                        f"Number of records with assertions not changed after {SLEEP_TIME * MAX_RETRIES} seconds, assuming Solr has finished committing"
+                    )
+                    return True
+                else:
+                    retries += 1
+                cnt += 1
+            return False
+
         def check_status(sync_url):
-            MAX_COUNT = 30
+            MAX_COUNT = 100
             SLEEP_TIME = 30
             cnt = 1
+            prev_records_with_assertions_count = ala_helper.get_assertion_records_count()
             while cnt <= MAX_COUNT:
                 time.sleep(SLEEP_TIME)
                 assertions_status = requests.get(f"{sync_url}/status", headers=headers)
                 records_with_assertions_count = ala_helper.get_assertion_records_count()
                 print(
-                    f"{cnt}: Sync Status API called successfully and here is status code: {assertions_status.status_code}, text:{assertions_status.text}, number of records with assertions:{records_with_assertions_count}"
+                    f"{cnt}: Sync Status API called successfully and here is status code: {assertions_status.status_code}, text: {assertions_status.text}, number of records with assertions:{records_with_assertions_count}"
                 )
                 if assertions_status.text == "No task is running":
+                    print("No task is running, checking if the record count is still changing")
+                    check_count_change(cnt, MAX_COUNT, SLEEP_TIME, records_with_assertions_count)
                     break
                 cnt += 1
             if cnt == MAX_COUNT:
