@@ -1,14 +1,11 @@
-import os
-
-import boto3 as boto3
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.operators.bash import BashOperator
-from airflow.utils.dates import days_ago
 from datetime import timedelta
-from urllib.request import Request, urlopen
 
-from ala import ala_helper, ala_config
+from airflow import DAG
+from airflow.operators.bash import BashOperator
+from airflow.operators.python import PythonOperator
+from airflow.utils.dates import days_ago
+
+from ala import ala_config, ala_helper
 
 DAG_ID = "Update_gbif_metadata"
 

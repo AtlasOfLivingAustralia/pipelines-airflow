@@ -13,6 +13,7 @@
 		"ghcr.io/devcontainers/features/aws-cli:1": {}
 	},
 	// add a port forwarding for solr to hosts localhost
+	
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [8765],
