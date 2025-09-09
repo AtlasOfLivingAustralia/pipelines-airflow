@@ -38,14 +38,10 @@ with DAG(
 
         ala_api_key = kwargs["ala_api_key"]
         registry_url = kwargs["registry_url"]
-
-        req = Request(ala_helper.join_url(registry_url, "/syncGBIF"))
-        req.add_header("Authorization", ala_api_key)
-        response = urlopen(req)
-        response.raise_for_status()
-        print(f"calling {req.full_url} was successful.")
-        content = response.read()
-        print(f"content: {content}")
+        response = ala_helper.call_url(
+            ala_helper.join_url(registry_url, "/syncGBIF"), headers={"Authorization": ala_api_key}
+        )
+        print(f"content: {response.content}")
 
     if ala_config.ENVIRONMENT_TYPE == "PROD":
         sync_s3_buckets_bash_op = BashOperator(
