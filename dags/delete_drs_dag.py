@@ -85,10 +85,6 @@ with DAG(
         s3_client = boto3.client("s3")
         s3 = boto3.resource("s3")
 
-        from ala.ala_helper import enable_debugpy
-
-        enable_debugpy()
-
         if not retain_dwca:
             _delete_prefix_objects(
                 bucket_name=ala_config.S3_BUCKET_DWCA,
