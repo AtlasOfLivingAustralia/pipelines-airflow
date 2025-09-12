@@ -19,6 +19,11 @@ log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
 
 
+def strtobool(val: str) -> bool:
+    """Lightweight, non-deprecated alternative to distutils.util.strtobool."""
+    return str(val).strip().lower() in {"y", "yes", "t", "true", "on", "1"}
+
+
 def call_url(url, headers=None, timeout=60) -> requests.Response:
     """
     Sends a GET request to the specified URL with optional headers and returns the response.

@@ -5,11 +5,57 @@ from datetime import timedelta
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from ala import ala_config
-from ala.ala_helper import get_default_args, get_success_notification_operator
-from distutils.util import strtobool
+from ala.ala_helper import get_default_args, get_success_notification_operator, strtobool
 import logging
 
+
 DAG_ID = "Delete_dataset_dag"
+
+
+def _delete_prefix_objects(
+    *,
+    bucket_name: str,
+    prefix: str,
+    s3_resource,
+    s3_client,
+    description: str,
+    exclude_contains: list[str] | None = None,
+) -> int:
+    """Delete objects under a prefix with optional substring-based exclusions.
+
+    Returns number of deleted objects (post exclusion). Logs findings.
+    """
+    exclude_contains = exclude_contains or []
+    bucket = s3_resource.Bucket(bucket_name)
+    objs = [o.key for o in bucket.objects.filter(Prefix=prefix)]
+    if not objs:
+        logging.info("No objects found under s3://%s/%s — skipping %s", bucket_name, prefix, description)
+        return 0
+    filtered = [k for k in objs if all(excl not in k for excl in exclude_contains)]
+    if not filtered:
+        logging.info(
+            "All %d objects under s3://%s/%s excluded for %s (exclusions=%s)",
+            len(objs),
+            bucket_name,
+            prefix,
+            description,
+            exclude_contains,
+        )
+        return 0
+    logging.info(
+        "Deleting %d/%d %s objects under s3://%s/%s (exclusions=%s)",
+        len(filtered),
+        len(objs),
+        description,
+        bucket_name,
+        prefix,
+        exclude_contains,
+    )
+    for i in range(0, len(filtered), 1000):
+        chunk = filtered[i : i + 1000]
+        s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": [{"Key": k} for k in chunk], "Quiet": True})
+    return len(filtered)
+
 
 with DAG(
     dag_id=DAG_ID,
@@ -30,12 +76,7 @@ with DAG(
 ) as dag:
 
     def delete_dataset_files(**kwargs):
-        """
-        Delete dataset files in s3 by aws cli command
-        :param kwargs:
-        :return: None
-        """
-
+        """Delete dataset files in S3 for provided datasetIds string (space separated)."""
         datasets_param = kwargs["dag_run"].conf["datasetIds"]
         delete_avro_files = strtobool(kwargs["dag_run"].conf["delete_avro_files"])
         retain_dwca = strtobool(kwargs["dag_run"].conf["retain_dwca"])
@@ -44,31 +85,43 @@ with DAG(
         s3_client = boto3.client("s3")
         s3 = boto3.resource("s3")
 
+        from ala.ala_helper import enable_debugpy
+
+        enable_debugpy()
+
         if not retain_dwca:
-            bucket = s3.Bucket(ala_config.S3_BUCKET_DWCA)
-            bucket.objects.filter(Prefix=f"dwca-imports/{datasets_param}/").delete()
+            _delete_prefix_objects(
+                bucket_name=ala_config.S3_BUCKET_DWCA,
+                prefix=f"dwca-imports/{datasets_param}/",
+                s3_resource=s3,
+                s3_client=s3_client,
+                description="DWCA",
+            )
 
         if delete_avro_files:
+            _delete_prefix_objects(
+                bucket_name=ala_config.S3_BUCKET_AVRO,
+                prefix=f"pipelines-all-datasets/index-record/{datasets_param}/",
+                s3_resource=s3,
+                s3_client=s3_client,
+                description="index-record",
+            )
+            _delete_prefix_objects(
+                bucket_name=ala_config.S3_BUCKET_AVRO,
+                prefix=f"dwca-exports/{datasets_param}.zip",
+                s3_resource=s3,
+                s3_client=s3_client,
+                description="dwca-exports-zip",
+            )
 
-            avro_bucket = s3.Bucket(ala_config.S3_BUCKET_AVRO)
-
-            logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets/index-record/{datasets_param}/")
-            avro_bucket.objects.filter(Prefix=f"pipelines-all-datasets/index-record/{datasets_param}/").delete()
-
-            logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/dwca-exports/{datasets_param}.zip")
-            avro_bucket.objects.filter(Prefix=f"dwca-exports/{datasets_param}.zip").delete()
-
-            exclude_uuid = ""
-            if retain_uuid:
-                exclude_uuid = "--exclude '1/identifiers/*.*' --exclude 'identifiers-backup/*.*'"
-
-            logging.info(f"Deleting {ala_config.S3_BUCKET_AVRO}/pipelines-data/{datasets_param}/")
-            objs = avro_bucket.objects.filter(Prefix=f"pipelines-data/{datasets_param}/").delete()
-            for obj in objs:
-                if retain_uuid and "identifiers" not in obj["key"]:
-                    s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=obj.key)
-                elif not retain_uuid:
-                    s3_client.delete_object(Bucket=ala_config.S3_BUCKET_AVRO, Key=obj.key)
+            _delete_prefix_objects(
+                bucket_name=ala_config.S3_BUCKET_AVRO,
+                prefix=f"pipelines-data/{datasets_param}/",
+                s3_resource=s3,
+                s3_client=s3_client,
+                description="pipelines-data",
+                exclude_contains=["identifiers/", "identifiers-backup/"] if retain_uuid else None,
+            )
 
     delete_dataset_in_s3 = PythonOperator(
         task_id="delete_dataset", provide_context=True, op_kwargs={}, python_callable=delete_dataset_files
@@ -87,16 +140,14 @@ with DAG(
             logging.info("Records not removed from solr")
             return
 
-        def get_cmd(dr):
+        def get_cmd(dr: str) -> str:
             solr_ws = f"{ala_config.SOLR_URL}/{ala_config.SOLR_COLLECTION}/update?commit=true"
-            return f"curl {solr_ws} -H 'Content-Type: text/xml'  --data-binary '<delete><query>dataResourceUid:{dr}</query></delete>'"
+            return f"curl {solr_ws} -H 'Content-Type: text/xml' --data-binary '<delete><query>dataResourceUid:{dr}</query></delete>'"
 
         datasets_param = kwargs["dag_run"].conf["datasetIds"]
         dataset_list = datasets_param.split()
-
         for count, dr in enumerate(dataset_list):
-            bash_operator = BashOperator(task_id=f"delete_solr_{dr}_task{str(count)}", bash_command=get_cmd(dr=dr))
-
+            bash_operator = BashOperator(task_id=f"delete_solr_{dr}_task{count}", bash_command=get_cmd(dr=dr))
             bash_operator.execute(context=kwargs)
 
     delete_dataset_in_solr = PythonOperator(
@@ -115,22 +166,21 @@ with DAG(
             logging.info("Skipped removing from es")
             return
 
-        def get_cmd(dr):
+        def get_cmd(dr: str) -> str:
             es_hosts = ala_config.ES_HOSTS.split(",")
-            es_host = es_hosts[0] if len(es_hosts) > 0 else ""  # for eg: http://aws-events-es-2022-1.ala:9200
+            es_host = es_hosts[0] if es_hosts else ""
             es_ws = f"{es_host}/{ala_config.ES_ALIAS}_{dr}"
             return f"curl -X DELETE {es_ws}"
 
         datasets_param = kwargs["dag_run"].conf["datasetIds"]
         dataset_list = datasets_param.split()
-
         for count, dr in enumerate(dataset_list):
-            bash_operator = BashOperator(task_id=f"delete_es_{dr}_task{str(count)}", bash_command=get_cmd(dr=dr))
-
+            bash_operator = BashOperator(task_id=f"delete_es_{dr}_task{count}", bash_command=get_cmd(dr=dr))
             bash_operator.execute(context=kwargs)
 
     delete_dataset_in_es = PythonOperator(
         task_id="delete_dataset_in_es", provide_context=True, op_kwargs={}, python_callable=remove_from_es
     )
 
-    (delete_dataset_in_s3 >> delete_dataset_in_solr >> delete_dataset_in_es >> get_success_notification_operator())
+    notify = get_success_notification_operator()
+    _workflow = delete_dataset_in_s3 >> delete_dataset_in_solr >> delete_dataset_in_es >> notify
