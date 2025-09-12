@@ -19,7 +19,7 @@ log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
 
 
-def call_url(url, headers=None) -> requests.Response:
+def call_url(url, headers=None, timeout=60) -> requests.Response:
     """
     Sends a GET request to the specified URL with optional headers and returns the response.
 
@@ -35,7 +35,7 @@ def call_url(url, headers=None) -> requests.Response:
     """
     try:
         print(f"Calling URL: {url}")
-        with requests.get(url, headers=headers, timeout=60) as response:
+        with requests.get(url, headers=headers, timeout=timeout) as response:
             response.raise_for_status()
             print(f"Response: {response}")
             return response
@@ -761,10 +761,13 @@ def get_assertion_records_count():
         requests.RequestException: If the HTTP request to the Biocache service fails.
         json.JSONDecodeError: If the response from the Biocache service is not valid JSON.
     """
-    records_with_assertions = json.loads(
-        requests.get(f"{ala_config.BIOCACHE_URL}/occurrence/search?q=userAssertions%3A*&pageSize=0", timeout=60).text
-    )
-    return records_with_assertions.get("totalRecords", 0)
+    try:
+        response = call_url(f"{ala_config.BIOCACHE_URL}/occurrence/search?q=userAssertions%3A*&pageSize=0", timeout=60)
+        records_with_assertions = json.loads(response.text)
+        return records_with_assertions.get("totalRecords", 0)
+    except Exception as e:
+        log.error("Error fetching assertion records count: %s", e)
+        return -1
 
 
 def get_metadata_as_json(registry_base_url, uid, ala_api_key):
