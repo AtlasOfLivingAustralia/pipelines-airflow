@@ -3,14 +3,12 @@
 # This will recreate the full index and swap the SOLR alias on successful completion.
 # It will also remove old collections.
 #
-import json
 from airflow import DAG
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.python import PythonOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator
 from airflow.utils.task_group import TaskGroup
-from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator
 from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator
 from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
@@ -21,20 +19,16 @@ from distutils.util import strtobool
 from datetime import date, timedelta, datetime
 import logging
 
-import requests
 from ala import ala_config, ala_helper, cluster_setup
 from ala.ala_helper import (
     step_bash_cmd,
     s3_cp,
     emr_python_step,
     get_default_args,
-    call_url,
     get_assertion_records_count,
 )
 
 DAG_ID = "Full_index_to_solr"
-
-solrCollectionName = f"{ala_config.SOLR_COLLECTION}-" + datetime.now().strftime("%Y-%m-%d-%H-%M")
 
 
 def get_spark_steps(
@@ -44,22 +38,20 @@ def get_spark_steps(
     return [
         emr_python_step(
             "a. Create SOLR collection",
-            f"/tmp/create_solr_collection_cli.py -c {ala_config.SOLR_CONFIGSET} -s {ala_config.SOLR_URL}"
-            f" -a create_solr_collection {solrCollectionName}",
+            f"/tmp/create_solr_collection_cli.py -c {ala_config.SOLR_CONFIGSET} -s {ala_config.SOLR_URL} -a create_solr_collection {solr_collection_name}",
         ),
         emr_python_step(
             "b. Add initial replicas",
-            f"/tmp/create_solr_collection_cli.py -c {ala_config.SOLR_CONFIGSET} -s {ala_config.SOLR_URL}"
-            f" -a add_initial_replicas {solrCollectionName}",
+            f"/tmp/create_solr_collection_cli.py -c {ala_config.SOLR_CONFIGSET} -s {ala_config.SOLR_URL} -a add_initial_replicas {solr_collection_name}",
         ),
         s3_cp(
             "c. Copy Sampling and IndexRecord to S3",
             f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets",
-            f"hdfs:///pipelines-all-datasets",
+            "hdfs:///pipelines-all-datasets",
         ),
-        step_bash_cmd("d. Sampling pipeline", f" la-pipelines sample all --cluster"),
-        step_bash_cmd("e. JackKnife pipeline", f" la-pipelines jackknife all --cluster"),
-        step_bash_cmd("f. Clustering", f" la-pipelines clustering all --cluster"),
+        step_bash_cmd("d. Sampling pipeline", " la-pipelines sample all --cluster"),
+        step_bash_cmd("e. JackKnife pipeline", " la-pipelines jackknife all --cluster"),
+        step_bash_cmd("f. Clustering", " la-pipelines clustering all --cluster"),
         s3_cp(
             "g. Copy Outlier from S3",
             f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-outlier",
@@ -72,7 +64,7 @@ def get_spark_steps(
             "hdfs:///pipelines-annotations/",
             action_on_failure="CONTINUE",
         ),
-        step_bash_cmd("h. Outlier distribution", f" la-pipelines outlier all --cluster"),
+        step_bash_cmd("h. Outlier distribution", " la-pipelines outlier all --cluster"),
         step_bash_cmd(
             "i. SOLR indexing",
             f' la-pipelines solr all --cluster --extra-args="numOfPartitions={num_partitions},solrCollection={solr_collection_name},includeSampling={include_sampling},includeJackKnife={include_jack_knife},includeClustering={include_clustering},includeOutlier={include_outlier}"',
@@ -92,7 +84,7 @@ def get_spark_steps(
         ),
         step_bash_cmd(
             "m. Delete temp SCP directories created by s3-dist-cp",
-            f' sudo -u hadoop hdfs dfs -rm -f "/pipelines-outlier/pipelines-outlier_\\$folder\\$"',
+            ' sudo -u hadoop hdfs dfs -rm -f "/pipelines-outlier/pipelines-outlier_\$folder\$"',
             action_on_failure="CONTINUE",
         ),
         s3_cp(
@@ -114,7 +106,7 @@ def get_spark_steps(
             action_on_failure="CONTINUE",
         ),
         emr_python_step(
-            f"k. Check index and update collection alias",
+            "k. Check index and update collection alias",
             f"/tmp/update_collection_alias_cli.py --solr_base {ala_config.SOLR_URL} --new_collection {solr_collection_name}"
             f" --collection_to_keep {ala_config.SOLR_COLLECTION_TO_KEEP} --solr_alias {ala_config.SOLR_COLLECTION} "
             f" --old_collection {ala_config.SOLR_COLLECTION}  auto_all",
@@ -140,7 +132,17 @@ with DAG(
     },
 ) as dag:
 
-    new_collection = f'{ala_config.SOLR_COLLECTION}-{datetime.now().strftime("%Y-%m-%d-%H-%M")}'
+    def _generate_collection_name(**context):
+        logical_date: datetime = context["logical_date"]
+        name = f"{ala_config.SOLR_COLLECTION}-{logical_date.strftime('%Y-%m-%d-%H-%M')}"
+        logging.info(f"Generated SOLR collection name: {name}")
+        return name
+
+    generate_collection_name = PythonOperator(
+        task_id="generate_collection_name",
+        python_callable=_generate_collection_name,
+        provide_context=True,
+    )
 
     def check_image_sync_flag(**kwargs):
         skip_image_sync = strtobool(kwargs["dag_run"].conf["skipImageSync"])
@@ -321,9 +323,14 @@ with DAG(
             if strtobool(include_sampling):
                 num_partitions = 8
 
+            ti = kwargs["ti"]
+            solr_collection_name = ti.xcom_pull(task_ids="generate_collection_name")
+            if not solr_collection_name:
+                raise ValueError("SOLR collection name missing from XCom")
+
             spark_steps.extend(
                 get_spark_steps(
-                    solr_collection_name=new_collection,
+                    solr_collection_name=solr_collection_name,
                     include_sampling=include_sampling,
                     include_jack_knife=include_jack_knife,
                     include_clustering=include_clustering,
@@ -411,7 +418,7 @@ with DAG(
         op_kwargs={"url": ala_config.DASHBOARD_CACHE_CLEAR_URL},
     )
 
-    asserted_records_count_task >> check_image_sync_flag >> [image_sync, full_index_to_solr]
+    asserted_records_count_task >> generate_collection_name >> check_image_sync_flag >> [image_sync, full_index_to_solr]
     (image_sync >> get_drs_for_image_sync_index >> check_image_sync_count >> [full_index_to_solr, image_sync_batch])
     image_sync_batch >> image_sync_batch_task_grp >> full_index_to_solr
     full_index_to_solr >> full_index_to_solr_task_grp
