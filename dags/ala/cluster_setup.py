@@ -4,17 +4,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from airflow.operators.python import PythonOperator
-from airflow.providers.amazon.aws.operators.emr import (
-    EmrAddStepsOperator,
-    EmrCreateJobFlowOperator,
-)
+from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator, EmrCreateJobFlowOperator
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor, EmrStepSensor
 from ala import ala_config
-from ala.ala_helper import (
-    get_dr_count,
-    get_success_notification_operator,
-    step_bash_cmd,
-)
+from ala.ala_helper import get_dr_count, get_success_notification_operator, step_bash_cmd
 
 
 class ClusterType(Enum):
@@ -118,6 +111,38 @@ def sanitize_tag(input_string):
     return sanitized_string
 
 
+def sanitize_name(input_string: str, limit: int = 256) -> str:
+    """Return a sanitized EMR cluster name.
+
+    Steps:
+    - Normalize whitespace, convert runs of whitespace to single hyphen.
+    - Remove all chars except A–Z a–z 0–9 . _ - [ ]
+    - Collapse consecutive - or _ to a single instance.
+    - Trim leading/trailing . _ -
+    - Fallback to 'emr-cluster' if empty after cleaning.
+    - Enforce length limit (1..256); out-of-range limit values default to 256.
+
+        input_string (str): Raw proposed name.
+        limit (int): Max length (clamped to 1..256; invalid -> 256).
+
+        str: Sanitized cluster name.
+    """
+
+    s = re.sub(r"[^A-Za-z0-9._\[\]-]", " ", input_string)
+    s = re.sub(r"\s+", " ", s).strip(" ")
+    s = re.sub(r"[-_]{2,}", lambda m: m.group(0)[0], s)  # '--' -> '-', '__' -> '_'
+    s = s.strip("._-")
+
+    if not s:
+        s = "emr-cluster"
+
+    if limit < 1 or limit > 256:
+        limit = 256
+    s = s[:limit]
+
+    return s
+
+
 def get_environment():
     """
     Determines the current environment type based on the value of `ala_config.ENVIRONMENT_TYPE`.
@@ -176,7 +201,7 @@ class EMRConfig:
 
     @property
     def Name(self) -> str:
-        return f"{self.name} [{ala_config.ENVIRONMENT_TYPE.upper()}]"
+        return sanitize_name(f"[{ala_config.ENVIRONMENT_TYPE.upper()}] {self.name}")
 
     @property
     def LogUri(self) -> str:
@@ -200,8 +225,8 @@ class EMRConfig:
 
     def __post_init__(self):
         self.Tags += [
-            {"Key": "Name", "Value": sanitize_tag(self.Name)},
-            {"Key": "data-resources", "Value": sanitize_tag(self.data_resources)},
+            {"Key": "Name", "Value": sanitize_tag(sanitize_name(self.Name))},
+            {"Key": "data-resources", "Value": sanitize_tag(sanitize_name(self.data_resources))},
         ]
 
 
