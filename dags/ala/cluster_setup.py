@@ -265,7 +265,7 @@ class PreIngestionEMRConfig(EMRConfig):
                 "Name": "Bootstrap action",
                 "ScriptBootstrapAction": {
                     "Args": [f"{ala_config.S3_BUCKET}"],
-                    "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/bootstrap-preingestion-actions.sh",
+                    "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/sh/bootstrap-preingestion-actions.sh",
                 },
             }
         ],

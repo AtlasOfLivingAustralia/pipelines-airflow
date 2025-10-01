@@ -104,7 +104,7 @@ def get_bootstrap_actions(bootstrap_script):
             "Name": "Bootstrap actions for datasets",
             "ScriptBootstrapAction": {
                 "Args": [f"{S3_BUCKET}"],
-                "Path": f"s3://{S3_BUCKET}/airflow/dags/{bootstrap_script}",
+                "Path": f"s3://{S3_BUCKET}/airflow/dags/sh/{bootstrap_script}",
             },
         },
         get_bootstrap_config(),
@@ -145,6 +145,6 @@ def get_bootstrap_config():
                 f"{ES_HOSTS}",  # 14
                 f"{ES_ALIAS}",  # 15
             ],
-            "Path": f"s3://{S3_BUCKET}/airflow/dags/bootstrap-la-pipelines-config.sh",
+            "Path": f"s3://{S3_BUCKET}/airflow/dags/sh/bootstrap-la-pipelines-config.sh",
         },
     }
