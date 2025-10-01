@@ -19,6 +19,7 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.dates import days_ago
 from airflow.utils.trigger_rule import TriggerRule
+from airflow.utils.task_group import TaskGroup
 
 from ala import ala_helper, ala_config
 from ala.ala_helper import strtobool
@@ -28,12 +29,12 @@ excluded_datasets = ala_config.EXCLUDED_DATASETS
 DAG_ID = "Ingest_all_datasets"
 
 # Thresholds control cumulative total size per category (ascending order of capacity)
-SMALL_TOTAL_THRESHOLD = 25_000_000  # cumulative threshold for small category per cluster in bytes
-LARGE_TOTAL_THRESHOLD = 10_000_000_000  # cumulative threshold for large category per cluster in bytes
+SMALL_TOTAL_THRESHOLD = ala_config.EMR_SMALL_CLUSTER_TOTAL_THRESHOLD
+LARGE_TOTAL_THRESHOLD = ala_config.EMR_LARGE_CLUSTER_TOTAL_THRESHOLD
 
-SMALL_INGEST_TASKS = 6
-LARGE_INGEST_TASKS = 3
-XLARGE_INGEST_TASKS = 1
+SMALL_INGEST_TASKS = ala_config.EMR_SMALL_CLUSTER_NODE_COUNT
+LARGE_INGEST_TASKS = ala_config.EMR_LARGE_CLUSTER_NODE_COUNT
+XLARGE_INGEST_TASKS = ala_config.EMR_XLARGE_CLUSTER_NODE_COUNT
 TASKS_CATEGORIES = {"small": SMALL_INGEST_TASKS, "large": LARGE_INGEST_TASKS, "xlarge": XLARGE_INGEST_TASKS}
 
 
@@ -200,19 +201,21 @@ with DAG(
         task_id="partition_datasets", provide_context=True, python_callable=partition_datasets_callable
     )
 
-    ingest_datasets_tasks = {}
+    # Build TaskGroups per category for clearer graph visualization
+    ingest_datasets_groups = {}
     for cat, ingest_task_count in TASKS_CATEGORIES.items():
-        ingest_datasets_tasks[cat] = []
-        for batch_num in range(1, ingest_task_count + 1):
-            conf_template = {
-                "datasetIds": "{{ task_instance.xcom_pull(task_ids='partition_datasets', key='process_%s_batch%i') }}"
-                % (cat, batch_num),
-                "load_images": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='load_images') }}",
-                "run_indexing": "false",
-                "skip_dwca_to_verbatim": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='skip_dwca_to_verbatim') }}",
-                "override_uuid_percentage_check": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='override_uuid_percentage_check') }}",
-            }
-            ingest_datasets_tasks[cat].append(
+        group_id = f"{cat}_ingest_{ingest_task_count}_batches"
+        tooltip = f"{cat} category ingestion ({ingest_task_count} batches)"
+        with TaskGroup(group_id=group_id, tooltip=tooltip) as tg:
+            for batch_num in range(1, ingest_task_count + 1):
+                conf_template = {
+                    "datasetIds": "{{ task_instance.xcom_pull(task_ids='partition_datasets', key='process_%s_batch%i') }}"
+                    % (cat, batch_num),
+                    "load_images": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='load_images') }}",
+                    "run_indexing": "false",
+                    "skip_dwca_to_verbatim": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='skip_dwca_to_verbatim') }}",
+                    "override_uuid_percentage_check": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='override_uuid_percentage_check') }}",
+                }
                 TriggerDagRunOperator(
                     task_id=f"ingest_{cat}_datasets_batch{batch_num}_task",
                     trigger_dag_id=f"Ingest_{cat.replace('x', '')}_datasets",
@@ -220,7 +223,7 @@ with DAG(
                     trigger_rule=TriggerRule.NONE_FAILED,
                     conf=conf_template,
                 )
-            )
+        ingest_datasets_groups[cat] = tg
 
     full_index_to_solr = TriggerDagRunOperator(
         task_id="full_index_to_solr",
@@ -239,14 +242,9 @@ with DAG(
     # Explicit dependency wiring to avoid 'statement has no effect' lint noise
     check_args_task.set_downstream(list_datasets_in_bucket)
     list_datasets_in_bucket.set_downstream(partition)
-    for t in ingest_datasets_tasks["small"]:
-        partition.set_downstream(t)
-        t.set_downstream(check_proceed_to_index)
-    for t in ingest_datasets_tasks["large"]:
-        partition.set_downstream(t)
-        t.set_downstream(check_proceed_to_index)
-    for t in ingest_datasets_tasks["xlarge"]:
-        partition.set_downstream(t)
-        t.set_downstream(check_proceed_to_index)
+    # Category groups must all complete before indexing proceeds
+    partition >> ingest_datasets_groups["small"] >> check_proceed_to_index
+    partition >> ingest_datasets_groups["large"] >> check_proceed_to_index
+    partition >> ingest_datasets_groups["xlarge"] >> check_proceed_to_index
     check_proceed_to_index.set_downstream(full_index_to_solr)
     full_index_to_solr.set_downstream(ala_helper.get_success_notification_operator())

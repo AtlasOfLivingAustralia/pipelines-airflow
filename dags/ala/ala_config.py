@@ -29,6 +29,11 @@ EC2_SUBNET_ID = Variable.get("ec2_subnet_id")
 EC2_SMALL_EBS_SIZE_IN_GB = int(Variable.get("ec2_small_ebs_size_in_gb"))
 EC2_MEDIUM_EBS_SIZE_IN_GB = int(Variable.get("ec2_medium_ebs_size_in_gb"))
 EC2_MEDIUM_INSTANCE_COUNT = int(Variable.get("ec2_medium_instance_count"))
+EMR_SMALL_CLUSTER_NODE_COUNT = int(Variable.get("emr_small_cluster_node_count"))
+EMR_LARGE_CLUSTER_NODE_COUNT = int(Variable.get("emr_large_cluster_node_count"))
+EMR_XLARGE_CLUSTER_NODE_COUNT = int(Variable.get("emr_xlarge_cluster_node_count"))
+EMR_SMALL_CLUSTER_TOTAL_THRESHOLD = int(Variable.get("emr_small_cluster_total_threshold"))
+EMR_LARGE_CLUSTER_TOTAL_THRESHOLD = int(Variable.get("emr_large_cluster_total_threshold"))
 EMR_RELEASE = Variable.get("emr_release")
 EMR_RELEASE_PREINGESTION = Variable.get("emr_release_preingestion")
 ENVIRONMENT_TYPE = Variable.get("environment")
@@ -71,11 +76,9 @@ SOLR_CONFIGSET = Variable.get("solr_configset")
 SOLR_URL = Variable.get("solr_url")
 SOLR_REPLICATION_FACTOR = Variable.get("solr_collection_rf")
 SPARK_PROPERTIES = json.loads(Variable.get("spark_properties"))
-SPARK_SUBMIT_ARGS = Variable.get("spark_submit_args",
-                                "--num-executors=8 "
-                                 "--executor-cores=8 "
-                                 "--executor-memory=18G "
-                                 "--driver-memory=2G")
+SPARK_SUBMIT_ARGS = Variable.get(
+    "spark_submit_args", "--num-executors=8 " "--executor-cores=8 " "--executor-memory=18G " "--driver-memory=2G"
+)
 ZK_URL = Variable.get("zk_url")
 
 EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get("ec2_additional_master_security_groups").split(",")
