@@ -228,6 +228,14 @@ class EMRConfig:
             {"Key": "Name", "Value": sanitize_tag(sanitize_name(self.Name))},
             {"Key": "data-resources", "Value": sanitize_tag(sanitize_name(self.data_resources))},
         ]
+        self.BootstrapActions += [
+            {
+                "Name": "CloudWatch Agent",
+                "ScriptBootstrapAction": {
+                    "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/sh/bootstrap-cloudwatch-agent.sh"
+                },
+            }
+        ]
 
 
 @dataclass

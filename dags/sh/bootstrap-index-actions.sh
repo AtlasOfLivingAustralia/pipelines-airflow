@@ -38,20 +38,20 @@ sudo chmod -R 777 /usr/bin/la-pipelines
 sudo chmod -R 777 /usr/share/la-pipelines/logging_lib.sh
 
 # script to download AVRO from S3
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-datasets-for-indexing.sh  /tmp/download-datasets-for-indexing.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-datasets-for-indexing.sh  /tmp/download-datasets-for-indexing.sh
 sudo chmod -R 777 /tmp/download-datasets-for-indexing.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-datasets-image-sync.sh  /tmp/download-datasets-image-sync.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-datasets-image-sync.sh  /tmp/download-datasets-image-sync.sh
 sudo chmod -R 777 /tmp/download-datasets-image-sync.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/upload-indexed-image-sync-datasets.sh  /tmp/upload-indexed-image-sync-datasets.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/upload-indexed-image-sync-datasets.sh  /tmp/upload-indexed-image-sync-datasets.sh
 sudo chmod -R 777 /tmp/upload-indexed-image-sync-datasets.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/elastic-cleanup.sh  /tmp/elastic-cleanup.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/elastic-cleanup.sh  /tmp/elastic-cleanup.sh
 sudo chmod -R 777 /tmp/elastic-cleanup.sh
 
 
 # script to download AVRO from S3
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-annotations.sh  /tmp/download-annotations.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-annotations.sh  /tmp/download-annotations.sh
 sudo chmod -R 777 /tmp/download-annotations.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/upload-annotations.sh  /tmp/upload-annotations.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/upload-annotations.sh  /tmp/upload-annotations.sh
 sudo chmod -R 777 /tmp/upload-annotations.sh
 
 # SOLR collection management Python scripts

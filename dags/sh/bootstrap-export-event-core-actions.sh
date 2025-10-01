@@ -38,15 +38,15 @@ sudo chmod -R 777 /usr/bin/la-pipelines
 sudo chmod -R 777 /usr/share/la-pipelines/logging_lib.sh
 
 # Download / Upload scripts
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-event-avro-hdfs.sh  /tmp/download-event-avro-hdfs.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-event-avro-hdfs.sh  /tmp/download-event-avro-hdfs.sh
 sudo chmod -R 777 /tmp/download-event-avro-hdfs.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-datasets-hdfs.sh  /tmp/download-datasets-hdfs.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-datasets-hdfs.sh  /tmp/download-datasets-hdfs.sh
 sudo chmod -R 777 /tmp/download-datasets-hdfs.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-avro-hdfs-for-downloads.sh  /tmp/download-avro-hdfs-for-downloads.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-avro-hdfs-for-downloads.sh  /tmp/download-avro-hdfs-for-downloads.sh
 sudo chmod -R 777 /tmp/download-avro-hdfs-for-downloads.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/upload-hdfs-datasets.sh  /tmp/upload-hdfs-datasets.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/upload-hdfs-datasets.sh  /tmp/upload-hdfs-datasets.sh
 sudo chmod -R 777 /tmp/upload-hdfs-datasets.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/frictionless.sh  /tmp/frictionless.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/frictionless.sh  /tmp/frictionless.sh
 sudo chmod -R 777 /tmp/frictionless.sh
 
 sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/ala/README.HTML.template  /tmp/README.HTML.template
