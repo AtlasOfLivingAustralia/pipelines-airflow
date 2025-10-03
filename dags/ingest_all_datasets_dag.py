@@ -17,9 +17,11 @@ from airflow import DAG
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.models.baseoperator import chain
 from airflow.utils.dates import days_ago
 from airflow.utils.trigger_rule import TriggerRule
 from airflow.utils.task_group import TaskGroup
+from airflow.decorators import task
 
 from ala import ala_helper, ala_config
 from ala.ala_helper import strtobool
@@ -36,6 +38,11 @@ SMALL_INGEST_TASKS = ala_config.EMR_SMALL_CLUSTER_NODE_COUNT
 LARGE_INGEST_TASKS = ala_config.EMR_LARGE_CLUSTER_NODE_COUNT
 XLARGE_INGEST_TASKS = ala_config.EMR_XLARGE_CLUSTER_NODE_COUNT
 TASKS_CATEGORIES = {"small": SMALL_INGEST_TASKS, "large": LARGE_INGEST_TASKS, "xlarge": XLARGE_INGEST_TASKS}
+
+# Pools (must be created in Airflow: Admin -> Pools or via CLI) to limit concurrent cluster usage
+SMALL_POOL = "ingest_all_small_pool"
+LARGE_POOL = "ingest_all_large_pool"
+XLARGE_POOL = "ingest_all_xlarge_pool"
 
 
 def check_args(**kwargs):
@@ -203,27 +210,75 @@ with DAG(
 
     # Build TaskGroups per category for clearer graph visualization
     ingest_datasets_groups = {}
+    # Build TaskGroups for small and large only (fixed batch counts)
     for cat, ingest_task_count in TASKS_CATEGORIES.items():
+        if cat == "xlarge":
+            continue  # handled dynamically via task mapping below
         group_id = f"{cat}_ingest_{ingest_task_count}_batches"
         tooltip = f"{cat} category ingestion ({ingest_task_count} batches)"
         with TaskGroup(group_id=group_id, tooltip=tooltip) as tg:
-            for batch_num in range(1, ingest_task_count + 1):
-                conf_template = {
-                    "datasetIds": "{{ task_instance.xcom_pull(task_ids='partition_datasets', key='process_%s_batch%i') }}"
+            # Build a list of conf dicts (one per batch) using templated XCom pulls from partition
+            batch_confs = [
+                {
+                    "datasetIds": "{{ task_instance.xcom_pull(task_ids='partition_datasets', key='process_%s_batch%d') }}"
                     % (cat, batch_num),
                     "load_images": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='load_images') }}",
                     "run_indexing": "false",
                     "skip_dwca_to_verbatim": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='skip_dwca_to_verbatim') }}",
                     "override_uuid_percentage_check": "{{ task_instance.xcom_pull(task_ids='check_args_task', key='override_uuid_percentage_check') }}",
                 }
-                TriggerDagRunOperator(
-                    task_id=f"ingest_{cat}_datasets_batch{batch_num}_task",
-                    trigger_dag_id=f"Ingest_{cat.replace('x', '')}_datasets",
-                    wait_for_completion=True,
-                    trigger_rule=TriggerRule.NONE_FAILED,
-                    conf=conf_template,
-                )
+                for batch_num in range(1, ingest_task_count + 1)
+            ]
+
+            # Single mapped TriggerDagRunOperator instead of one per batch
+            TriggerDagRunOperator.partial(
+                task_id=f"ingest_{cat}_datasets",  # mapped task; indices will appear in the UI
+                trigger_dag_id=f"Ingest_{cat.replace('x', '')}_datasets",
+                wait_for_completion=True,
+                trigger_rule=TriggerRule.NONE_FAILED,
+                pool=SMALL_POOL if cat == "small" else LARGE_POOL,
+            ).expand(conf=batch_confs)
         ingest_datasets_groups[cat] = tg
+
+    @task(task_id="build_xlarge_confs")
+    def build_xlarge_confs():
+        """Return a list of conf dicts (one per xlarge dataset) for dynamic mapping.
+
+        If there are no xlarge datasets, returns an empty list (dynamic mapping will create zero tasks)."""
+        # Access context via get_current_context()
+        from airflow.operators.python import get_current_context
+
+        ctx = get_current_context()
+        ti = ctx["ti"]
+        xlarge_map = ti.xcom_pull(task_ids="partition_datasets", key="process_xlarge") or {}
+        if not xlarge_map:
+            return []
+        load_images = ti.xcom_pull(task_ids="check_args_task", key="load_images")
+        skip_dwca_to_verbatim = ti.xcom_pull(task_ids="check_args_task", key="skip_dwca_to_verbatim")
+        override_uuid_percentage_check = ti.xcom_pull(task_ids="check_args_task", key="override_uuid_percentage_check")
+        return [
+            {
+                "datasetIds": ds_id,
+                "load_images": str(load_images).lower(),
+                "run_indexing": "false",
+                "skip_dwca_to_verbatim": str(skip_dwca_to_verbatim).lower(),
+                "override_uuid_percentage_check": str(override_uuid_percentage_check).lower(),
+            }
+            for ds_id in xlarge_map.keys()
+        ]
+
+    # Create the TaskFlow task instance and enforce dependency on partition
+    build_xlarge_confs_task = build_xlarge_confs()
+    partition.set_downstream(build_xlarge_confs_task)
+
+    # Dynamic TriggerDagRunOperator per xlarge dataset (after partition + build_xlarge_confs)
+    xlarge_triggers = TriggerDagRunOperator.partial(
+        task_id="ingest_xlarge_dataset",
+        trigger_dag_id="Ingest_large_datasets",  # keep existing mapping (xlarge -> large ingest DAG)
+        wait_for_completion=True,
+        trigger_rule=TriggerRule.NONE_FAILED,
+        pool=XLARGE_POOL,
+    ).expand(conf=build_xlarge_confs_task)
 
     full_index_to_solr = TriggerDagRunOperator(
         task_id="full_index_to_solr",
@@ -240,11 +295,9 @@ with DAG(
     )
 
     # Explicit dependency wiring to avoid 'statement has no effect' lint noise
-    check_args_task.set_downstream(list_datasets_in_bucket)
-    list_datasets_in_bucket.set_downstream(partition)
+    chain(check_args_task, list_datasets_in_bucket, partition)
     # Category groups must all complete before indexing proceeds
-    partition >> ingest_datasets_groups["small"] >> check_proceed_to_index
-    partition >> ingest_datasets_groups["large"] >> check_proceed_to_index
-    partition >> ingest_datasets_groups["xlarge"] >> check_proceed_to_index
-    check_proceed_to_index.set_downstream(full_index_to_solr)
-    full_index_to_solr.set_downstream(ala_helper.get_success_notification_operator())
+    chain(partition, ingest_datasets_groups["small"], check_proceed_to_index)
+    chain(partition, ingest_datasets_groups["large"], check_proceed_to_index)
+    chain(build_xlarge_confs_task, xlarge_triggers, check_proceed_to_index)
+    chain(check_proceed_to_index, full_index_to_solr, ala_helper.get_success_notification_operator())
