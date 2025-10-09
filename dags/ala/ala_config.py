@@ -5,14 +5,15 @@ from airflow.models import Variable
 ALA_API_KEY = Variable.get("ala_api_key")
 DOI_API_KEY = Variable.get("doi_api_key")
 ALA_API_URL = Variable.get("ala_api_url")
-AUTH_SCOPE = Variable.get('auth_scope')
-AUTH_CLIENT_ID = Variable.get('auth_client_id')
-AUTH_CLIENT_SECRET = Variable.get('auth_client_secret')
-AUTH_TOKEN_URL = Variable.get('ala_oidc_url')
+AUTH_SCOPE = Variable.get("auth_scope")
+AUTH_CLIENT_ID = Variable.get("auth_client_id")
+AUTH_CLIENT_SECRET = Variable.get("auth_client_secret")
+AUTH_TOKEN_URL = Variable.get("ala_oidc_url")
 USER_DETAILS_ENDPOINT = Variable.get("user_details_endpoint")
 ALERT_EMAIL = Variable.get("alert_email")
 BACKUP_LOCATION = Variable.get("s3_bucket_backup")
 BIOCACHE_URL = Variable.get("biocache_url")
+BIOCACHE_WS = BIOCACHE_URL
 COLLECTORY_SERVER = Variable.get("registry_url")
 DASHBOARD_CACHE_CLEAR_URL = Variable.get("dashboard_cache_clear_url")
 DOI_URL = Variable.get("doi_url")
@@ -28,16 +29,21 @@ EC2_SUBNET_ID = Variable.get("ec2_subnet_id")
 EC2_SMALL_EBS_SIZE_IN_GB = int(Variable.get("ec2_small_ebs_size_in_gb"))
 EC2_MEDIUM_EBS_SIZE_IN_GB = int(Variable.get("ec2_medium_ebs_size_in_gb"))
 EC2_MEDIUM_INSTANCE_COUNT = int(Variable.get("ec2_medium_instance_count"))
+EMR_SMALL_CLUSTER_NODE_COUNT = int(Variable.get("emr_small_cluster_node_count"))
+EMR_LARGE_CLUSTER_NODE_COUNT = int(Variable.get("emr_large_cluster_node_count"))
+EMR_XLARGE_CLUSTER_NODE_COUNT = int(Variable.get("emr_xlarge_cluster_node_count"))
+EMR_SMALL_CLUSTER_TOTAL_THRESHOLD = int(Variable.get("emr_small_cluster_total_threshold"))
+EMR_LARGE_CLUSTER_TOTAL_THRESHOLD = int(Variable.get("emr_large_cluster_total_threshold"))
 EMR_RELEASE = Variable.get("emr_release")
 EMR_RELEASE_PREINGESTION = Variable.get("emr_release_preingestion")
 ENVIRONMENT_TYPE = Variable.get("environment")
 ES_ALIAS = Variable.get("es_alias")
 ES_HOSTS = Variable.get("es_hosts")
 EVENTS_URL = Variable.get("events_url")
-EXCLUDED_DATASETS = re.split(r'\s+', Variable.get("excluded_datasets", ''))
+EXCLUDED_DATASETS = re.split(r"\s+", Variable.get("excluded_datasets", ""))
 IMAGES_URL = Variable.get("images_url")
 JOB_FLOW_ROLE = Variable.get("job_flow_role")
-JOB_SCHEDULE_CONFIG = Variable.get("job_schedule_config")
+JOB_SCHEDULE_CONFIG = Variable.get("job_schedule_config", "")
 LISTS_URL = Variable.get("lists_url")
 LOAD_IMAGES = Variable.get("load_images")
 MASTER_MARKET = Variable.get("master_market")
@@ -62,32 +68,63 @@ SDS_BUCKET = Variable.get("sds_bucket")
 SDS_S3_DIRECTORY = Variable.get("sds_s3_directory")
 SERVICE_ROLE = Variable.get("service_role")
 SLAVE_MARKET = Variable.get("slave_market")
+SLACK_NOTIFICATION = Variable.get("slack_notification", "false").lower() in ("true", "1", "t")
+SLACK_ALERTS_CHANNEL = Variable.get("slack_alerts_channel")
 SOLR_COLLECTION = Variable.get("solr_collection")
 SOLR_COLLECTION_TO_KEEP = Variable.get("solr_collection_to_keep")
 SOLR_CONFIGSET = Variable.get("solr_configset")
 SOLR_URL = Variable.get("solr_url")
 SOLR_REPLICATION_FACTOR = Variable.get("solr_collection_rf")
 SPARK_PROPERTIES = json.loads(Variable.get("spark_properties"))
+SPARK_SUBMIT_ARGS = Variable.get(
+    "spark_submit_args", "--num-executors=8 " "--executor-cores=8 " "--executor-memory=18G " "--driver-memory=2G"
+)
 ZK_URL = Variable.get("zk_url")
 
-EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get('ec2_additional_master_security_groups').split(',')
-EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get('ec2_additional_slave_security_groups').split(',')
+EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get("ec2_additional_master_security_groups").split(",")
+EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get("ec2_additional_slave_security_groups").split(",")
+KEEP_EMR_ALIVE = Variable.get("keep_emr_alive_after_finish", "false").lower() in ("true", "1", "t")
 
 
 def get_bootstrap_actions(bootstrap_script):
+    """
+    Generates a list of bootstrap actions for initializing an EMR cluster.
+
+    Args:
+        bootstrap_script (str): The name of the bootstrap script to be executed, located in the S3 bucket.
+
+    Returns:
+        list: A list of dictionaries representing bootstrap actions, including the specified script and additional configuration from `get_bootstrap_config()`.
+
+    Note:
+        This function relies on the global variable `S3_BUCKET` and the function `get_bootstrap_config()`.
+    """
     return [
         {
             "Name": "Bootstrap actions for datasets",
             "ScriptBootstrapAction": {
                 "Args": [f"{S3_BUCKET}"],
-                "Path": f"s3://{S3_BUCKET}/airflow/dags/{bootstrap_script}",
-            }
+                "Path": f"s3://{S3_BUCKET}/airflow/dags/sh/{bootstrap_script}",
+            },
         },
-        get_bootstrap_config()
+        get_bootstrap_config(),
     ]
 
 
 def get_bootstrap_config():
+    """
+    Generates the bootstrap configuration dictionary for the Pipelines YAML config.
+
+    Returns:
+        dict: A dictionary containing the name of the config and a ScriptBootstrapAction
+            with arguments sourced from various environment variables and a script path.
+
+    The configuration includes:
+        - Name: The name of the bootstrap configuration.
+        - ScriptBootstrapAction:
+            - Args: A list of configuration values such as S3 bucket, API keys, and service URLs.
+            - Path: The S3 path to the bootstrap script.
+    """
     return {
         "Name": "Pipelines YAML config",
         "ScriptBootstrapAction": {
@@ -106,8 +143,8 @@ def get_bootstrap_config():
                 f"{SOLR_COLLECTION}",  # 12
                 f"{SOLR_CONFIGSET}",  # 13
                 f"{ES_HOSTS}",  # 14
-                f"{ES_ALIAS}"  # 15
+                f"{ES_ALIAS}",  # 15
             ],
-            "Path": f"s3://{S3_BUCKET}/airflow/dags/bootstrap-la-pipelines-config.sh",
-        }
+            "Path": f"s3://{S3_BUCKET}/airflow/dags/sh/bootstrap-la-pipelines-config.sh",
+        },
     }
