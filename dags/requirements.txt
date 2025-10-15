@@ -1,7 +1,8 @@
-# --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.2.2/constraints-3.7.txt"
-pydantic==2.5.3
-urllib3==1.26.7
-requests==2.26.0
-python-dateutil==2.8.2
+--constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.11.txt"
+pydantic
+urllib3
+requests
+python-dateutil
+apache-airflow-providers-slack
 oauth2client==4.1.3
 requests_oauth2client==1.1.0

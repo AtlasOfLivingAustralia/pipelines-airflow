@@ -1,25 +1,23 @@
 #!/bin/bash
 set -x
-s3_bucket_dwca=$1
-s3_bucket_avro=$2
+s3_bucket=$1
 
-for ((i = 3; i <= $#; i++ )); do
+sudo chown hadoop:hadoop -R /mnt/dwca-tmp
+sudo chown hadoop:hadoop -R /data/*
+
+for ((i = 2; i <= $#; i++ )); do
 
   export datasetId=${!i}
   echo 'Download ' $datasetId
 
   # Download file from s3
-  echo "Downloading s3://$s3_bucket_dwca/dwca-imports/$datasetId"
-  sudo -u hadoop aws s3 cp s3://$s3_bucket_dwca/dwca-imports/$datasetId /data/biocache-load/$datasetId --recursive
-  # Unzip dataset
-  echo "cd /data/biocache-load/$datasetId"
-  cd "/data/biocache-load/$datasetId"
-  echo $PWD
-  echo "jar xf $datasetId.zip"
-  sudo -u hadoop jar xf $datasetId.zip
+  echo "Downloading s3://$s3_bucket/pipelines-data/1/$datasetId/verbatim.avro"
+  sudo -u hadoop aws s3 cp s3://$s3_bucket/pipelines-data/$datasetId/1/verbatim/ /data/pipelines-data/$datasetId/1/verbatim/ --recursive
+  sudo -u hadoop aws s3 cp s3://$s3_bucket/pipelines-data/$datasetId/1/dwca-metrics.yml /data/pipelines-data/$datasetId/1/dwca-metrics.yml
+
   # Download existing identifiers from s3.
   # Note: For new drs, ala_uuid folder should not exist on the emr, if it does, the uuid step will error as there are not avro files inside
-  export identifier_path=s3://$s3_bucket_avro/pipelines-data/$datasetId/1/identifiers/ala_uuid
+  export identifier_path=s3://$s3_bucket/pipelines-data/$datasetId/1/identifiers/ala_uuid
   files_exists=`aws s3 ls $identifier_path`
   if [ ! -z "$files_exists" ]
   then

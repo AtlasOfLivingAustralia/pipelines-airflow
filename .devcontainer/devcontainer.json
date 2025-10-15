@@ -1,7 +1,7 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
-	"name": "Airflow 2.3.4",
+	"name": "Airflow 2.10.5 py-3.11",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
     "dockerComposeFile": [
 		"./docker-compose.yaml"
@@ -9,27 +9,30 @@
     "service": "airflow-scheduler",
     "workspaceFolder": "/opt/airflow",
 	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-
+	"features": {
+		"ghcr.io/devcontainers/features/aws-cli:1": {}
+	},
 	// add a port forwarding for solr to hosts localhost
+	
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [8765],
 	"mounts": [
+		"source=${localWorkspaceFolder},target=/opt/airflow,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/${remoteUser}/.cache,type=bind,consistency=cached",
 		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/${remoteUser}/.command-history,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.devcontainer,target=/opt/airflow/.devcontainer,type=bind,consistency=cached",
-		"source=~/.ssh,target=/home/airflow/.ssh,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached"
+		"source=~/.git,target=/home/airflow/.git,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached",
+		"source=${localWorkspaceFolder}/.devcontainer/.bash_aliases,target=/home/airflow/.bash_aliases,type=bind,consistency=cached"
 		],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"containerEnv": {
 		"PROMPT_COMMAND": "history -a",
-		"HISTFILE": "/home/${remoteUser}/.command-history/.bash_hist"
+		"HISTFILE": "/opt/airflow/.command-history/.bash_hist"
 	},
 
-	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-1.ala",
+	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-frost-1.ala",
 
 	// Configure tool-specific properties.
 	"customizations": {
@@ -52,7 +55,7 @@
 				"python.analysis.disableSemanticOnNoPython": false,
 				"python.analysis.enableSyncServer": true,
 				"python.analysis.userFileIndexingLimit": -1,
-                "python.defaultInterpreterPath": "/home/${remoteUser}/.local/lib/python3.11/site-packages/airflow/bin/python",
+                "python.defaultInterpreterPath": "/usr/bin/python3",
 				"python.formatting.provider": "none",
 				"python.languageServer": "Pylance",
 				"python.linting.enabled": false,
@@ -85,19 +88,17 @@
 				"ms-python.python",
 				"ms-python.vscode-pylance",
 				"GitHub.copilot",
+				"GitHub.copilot-chat",
 				"mechatroner.rainbow-csv",
 				"ms-toolsai.jupyter",
+				"ms-python.pylint",
+				"ms-python.black-formatter",
 				"ms-python.debugpy",
-				"amazonwebservices.aws-toolkit-vscode"
+				"amazonwebservices.aws-toolkit-vscode@3.35.0"			
 			]
 		}
 	},
-	
-	// "runArgs": [
-	// 	"--network=host",
-	// ],
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	"runArgs": ["--env-file","./.env"],
 	"remoteUser": "airflow"
 }

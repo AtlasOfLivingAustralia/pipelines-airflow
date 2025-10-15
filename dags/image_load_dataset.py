@@ -9,8 +9,12 @@ DAG_ID = 'Image_load_dataset'
 datasetId = "{{ dag_run.conf['datasetId'] }}"
 
 SPARK_STEPS = [
-    s3_cp(f"Copy Interpreted AVRO from S3 for {datasetId}", f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-data/{datasetId}/1", f"hdfs:///pipelines-data/{datasetId}/1"),
-    step_bash_cmd("Image loading", f" la-pipelines image-load {datasetId} --cluster")
+    s3_cp(
+        f"Copy Interpreted AVRO from S3 for {datasetId}",
+        f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-data/{datasetId}/1",
+        f"hdfs:///pipelines-data/{datasetId}/1",
+    ),
+    step_bash_cmd("Image loading", f" la-pipelines image-load {datasetId} --cluster"),
 ]
 
 with DAG(
@@ -21,6 +25,8 @@ with DAG(
     start_date=days_ago(1),
     schedule_interval=None,
     tags=['emr', 'single-dataset'],
-    params={"datasetId": "dr1010"}
+    params={"datasetId": "dr1010"},
 ) as dag:
-    cluster_setup.run_large_emr(dag, SPARK_STEPS, "bootstrap-ingest-large-actions.sh", cluster_size=4)
+    cluster_setup.run_large_emr(
+        dag, SPARK_STEPS, "bootstrap-ingest-large-actions.sh", cluster_size=4, dataset_ids=datasetId
+    )
