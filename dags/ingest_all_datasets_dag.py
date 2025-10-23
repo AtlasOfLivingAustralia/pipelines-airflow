@@ -56,6 +56,7 @@ def check_args(**kwargs):
 
 def list_datasets_in_bucket_callable(**kwargs):
     if strtobool(kwargs["dag_run"].conf["skip_dwca_to_verbatim"]):
+        kwargs["bucket"] = kwargs["bucket_avro"]
         return ala_helper.list_drs_verbatim_avro_in_bucket(**kwargs)
     else:
         return ala_helper.list_drs_dwca_in_bucket(**kwargs)
@@ -200,7 +201,7 @@ with DAG(
     list_datasets_in_bucket = PythonOperator(
         task_id="list_datasets_in_bucket",
         provide_context=True,
-        op_kwargs={"bucket": ala_config.S3_BUCKET_DWCA},
+        op_kwargs={"bucket": ala_config.S3_BUCKET_DWCA, "bucket_avro": ala_config.S3_BUCKET_AVRO},
         python_callable=list_datasets_in_bucket_callable,
     )
 
