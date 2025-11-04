@@ -4,10 +4,10 @@
 	"name": "Airflow 2.10.5 py-3.11",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
     "dockerComposeFile": [
-		"./docker-compose.yaml"
+		"docker-compose.yaml"
 	],
     "service": "airflow-scheduler",
-    "workspaceFolder": "/opt/airflow",
+    "workspaceFolder": "/workspace",
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
 		"ghcr.io/devcontainers/features/aws-cli:1": {}
@@ -18,18 +18,15 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [8765],
 	"mounts": [
-		"source=${localWorkspaceFolder},target=/opt/airflow,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.devcontainer/.cache,target=/home/${remoteUser}/.cache,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.devcontainer/.command-history,target=/home/${remoteUser}/.command-history,type=bind,consistency=cached",
-		"source=~/.git,target=/home/airflow/.git,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.vscode,target=/opt/airflow/.vscode,type=bind,consistency=cached",
-		"source=${localWorkspaceFolder}/.devcontainer/.bash_aliases,target=/home/airflow/.bash_aliases,type=bind,consistency=cached"
+		"source=devcontainer-cache,target=/home/${remoteUser}/.cache,type=volume",
+		"source=devcontainer-command-history,target=/home/${remoteUser}/.command-history,type=volume",
+		"source=${env:HOME}${env:USERPROFILE}/.git,target=/home/airflow/.git,type=bind,consistency=cached"
 		],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"containerEnv": {
 		"PROMPT_COMMAND": "history -a",
-		"HISTFILE": "/opt/airflow/.command-history/.bash_hist"
+		"HISTFILE": "/home/airflow/.command-history/.bash_hist"
 	},
 
 	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-frost-1.ala",

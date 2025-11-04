@@ -81,14 +81,17 @@ x-airflow-common:
     # If you want to use it, outcomment it and replace airflow.cfg with the name of your config file
     # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
   volumes:
-    - ..:/opt/airflow
+    # Mount project root as workspace for development (excludes logs, config, plugins)
+    - ..:/workspace
+    # Mount project DAGs folder to Airflow DAGs location
+    - ../dags:/opt/airflow/dags
+    # Use named volumes for logs, plugins, config (Podman on macOS doesn't support /opt bind mounts)
+    - airflow-logs:/opt/airflow/logs
+    - airflow-plugins:/opt/airflow/plugins
+    - airflow-config:/opt/airflow/config
+    # Mount user credentials and SSH keys
     - ~/.ssh:/home/airflow/.ssh:ro
     - ~/.aws:/home/airflow/.aws:ro
-    # - ../logs:/opt/airflow/logs
-    # - ../config:/opt/airflow/config
-    # - ../plugins:/opt/airflow/plugins
-    # - ~/.aws:/home/airflow/.aws
-    # - ./airflow_docker_debug_wrapper.py:/home/${REMOTE_USER}/.local/bin/airflow
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -105,7 +108,7 @@ services:
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
     volumes:
-      - ./.pg/data:/var/lib/postgresql/data
+      - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
@@ -261,8 +264,8 @@ services:
           echo "   https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#before-you-begin"
           echo
         fi
-        mkdir -p /sources/logs /sources/dags /sources/plugins
-        chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins}
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config
+        chown -R "${AIRFLOW_UID}:0" /opt/airflow/{logs,dags,plugins,config}
         exec /entrypoint airflow version
     # yamllint enable rule:line-length
     environment:
@@ -274,8 +277,10 @@ services:
       _PIP_ADDITIONAL_REQUIREMENTS: ''
     user: "0:0"
     volumes:
-      - .:/sources
-
+    - ../dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+    - airflow-plugins:/opt/airflow/plugins
+    - airflow-config:/opt/airflow/config
   airflow-cli:
     <<: *airflow-common
     profiles:
@@ -310,3 +315,9 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
+
+volumes:
+  postgres-db-volume:
+  airflow-logs:
+  airflow-plugins:
+  airflow-config:

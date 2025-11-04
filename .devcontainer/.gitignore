@@ -1,1 +1,13 @@
+# Devcontainer runtime directories
+logs/
+config/
+plugins/
+.pg/
+.cache/
+.command-history/
+
+# Symlinked directories (if any)
+dags
+
+# Keep .env out of git
 .env

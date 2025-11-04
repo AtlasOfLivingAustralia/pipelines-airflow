@@ -7,6 +7,8 @@
 /bin/
 *.iml
 /logs
+/config
+/plugins
 /airflow.cfg
 webserver_config.py
 airflow-webserver.pid
