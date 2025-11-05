@@ -151,7 +151,7 @@ def compare_records(record_id: str):
     new_docs = result["response"]["docs"]
     result = json_parse(
         f"{old_collection}/select",
-        {"q": "id:" + record_id, "rows": "10", "wt": "json", "facet": "false"},
+        {"q": f'id:"{record_id}"', "rows": "10", "wt": "json", "facet": "false"},
         solr_cluster=solr_base,
     )
     if result is None:

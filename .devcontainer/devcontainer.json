@@ -10,7 +10,8 @@
     "workspaceFolder": "/workspace",
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
-		"ghcr.io/devcontainers/features/aws-cli:1": {}
+		"ghcr.io/devcontainers/features/aws-cli:1": {},
+		"ghcr.io/devcontainers/features/git:1": {}
 	},
 	// add a port forwarding for solr to hosts localhost
 	
@@ -19,17 +20,19 @@
 	// "forwardPorts": [8765],
 	"mounts": [
 		"source=devcontainer-cache,target=/home/${remoteUser}/.cache,type=volume",
-		"source=devcontainer-command-history,target=/home/${remoteUser}/.command-history,type=volume",
+		"source=devcontainer-command-history,target=/home/${remoteUser}/.bash_history_dir,type=volume",
 		"source=${env:HOME}${env:USERPROFILE}/.git,target=/home/airflow/.git,type=bind,consistency=cached"
 		],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
+	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && (ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-frost-1.ala || true)",
+	
+	"postStartCommand": "mkdir -p ~/.bash_history_dir && touch ~/.bash_history_dir/.bash_history",
+	
 	"containerEnv": {
 		"PROMPT_COMMAND": "history -a",
-		"HISTFILE": "/home/airflow/.command-history/.bash_hist"
+		"HISTFILE": "/home/airflow/.bash_history_dir/.bash_history"
 	},
-
-	"postCreateCommand": "echo alias ll=\\'ls -alF\\' >> ~/.bash_aliases && ssh -NfL 0.0.0.0:8983:localhost:8983 aws-solr-test-frost-1.ala",
 
 	// Configure tool-specific properties.
 	"customizations": {
@@ -81,18 +84,18 @@
 				  "terminal.integrated.defaultProfile.linux": "bash (container default)"
 				}
 			  },      
-			"extensions": [
-				"ms-python.python",
-				"ms-python.vscode-pylance",
-				"GitHub.copilot",
-				"GitHub.copilot-chat",
-				"mechatroner.rainbow-csv",
-				"ms-toolsai.jupyter",
-				"ms-python.pylint",
-				"ms-python.black-formatter",
-				"ms-python.debugpy",
-				"amazonwebservices.aws-toolkit-vscode@3.35.0"			
-			]
+		"extensions": [
+			"ms-python.python",
+			"ms-python.vscode-pylance",
+			"GitHub.copilot",
+			"GitHub.copilot-chat",
+			"mechatroner.rainbow-csv",
+			"ms-toolsai.jupyter",
+			"ms-python.pylint",
+			"ms-python.black-formatter",
+			"ms-python.debugpy",
+			"amazonwebservices.aws-toolkit-vscode@3.35.0"
+		]
 		}
 	},
 
