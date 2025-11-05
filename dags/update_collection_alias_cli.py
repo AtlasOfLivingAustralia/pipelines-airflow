@@ -22,6 +22,7 @@ checks_available = [
     "check_spatial_layer_cl1048",
     "check_spatial_layer_cl966",
     "check_spatial_layer_cl21",
+    "check_representative_fields",
 ]
 checks_available.sort()
 
@@ -139,6 +140,14 @@ def compare_records(record_id: str):
         "assertionUserId",
         "lastAssertionDate",
     ]
+    # These fields are checked at facet level (total count) rather than per-record level
+    representative_fields = [
+        "associatedOccurrences",
+        "isRepresentativeOf",
+        "duplicateStatus",
+        "duplicateType",
+        "isRepresentativeOfCount",
+    ]
     status = ResultStatus.PASS
     result = json_parse(
         f"{new_collection}/select",
@@ -170,7 +179,7 @@ def compare_records(record_id: str):
     else:
         new_doc = new_docs[0]
         old_doc = old_docs[0]
-        missing_field_set = old_doc.keys() - assertion_fields - new_doc.keys()
+        missing_field_set = old_doc.keys() - assertion_fields - representative_fields - new_doc.keys()
         if len(missing_field_set):
             print(
                 f"SEVERE- RECORD ID:{record_id} - There are {len(missing_field_set):,} fields which are missing in the new records. Here is the list: {missing_field_set}"
@@ -582,6 +591,30 @@ def check_spatial_layer_cl21(**kwargs):
     parse_params(kwargs)
 
     return check_facet("cl21", "cl21:*", 10, 100, "count")
+
+
+def check_representative_fields(**kwargs):
+    parse_params(kwargs)
+    # Check all representative/duplicate related fields at facet level
+    fields_to_check = [
+        "associatedOccurrences",
+        "isRepresentativeOf",
+        "duplicateStatus",
+        "duplicateType",
+        "isRepresentativeOfCount",
+    ]
+    
+    status_list = []
+    for field in fields_to_check:
+        status = check_facet(field, f"{field}:*")
+        status_list.append(status)
+    
+    # Return FAIL if any check fails, otherwise return the worst status
+    if ResultStatus.FAIL in status_list:
+        return ResultStatus.FAIL
+    elif ResultStatus.WARN in status_list:
+        return ResultStatus.WARN
+    return ResultStatus.PASS
 
 
 def switch_collection_alias(**kwargs):

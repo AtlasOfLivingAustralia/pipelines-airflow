@@ -24,6 +24,7 @@ checks_available = [
     "check_spatial_layer_cl1048",
     "check_spatial_layer_cl966",
     "check_spatial_layer_cl21",
+    "check_representative_fields",
 ]
 checks_available.sort()
 checks_selected = {}
@@ -119,6 +120,9 @@ with DAG(
     # IMCRA 4 Regions
     def check_spatial_layer_cl21(**kwargs):
         return check_function("check_spatial_layer_cl21", ucli.check_spatial_layer_cl21, **kwargs)
+
+    def check_representative_fields(**kwargs):
+        return check_function("check_representative_fields", ucli.check_representative_fields, **kwargs)
 
     def switch_collection_alias(**kwargs):
         ti = kwargs["ti"]
