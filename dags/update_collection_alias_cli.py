@@ -120,10 +120,12 @@ def check_minimum_field_count(minimum_field_count: int, record_id: str, collecti
             )
         else:
             doc = docs[0]
-            if len(doc) < minimum_field_count:
+            # Use minimum of 8 fields for records with IDs containing '://' (e.g., DOI URLs)
+            adjusted_minimum = 8 if "://" in record_id else minimum_field_count
+            if len(doc) < adjusted_minimum:
                 status = ResultStatus.FAIL
                 print(
-                    f"SEVERE- RECORD ID: {record_id} - Number of fields are {len(doc):,} and minimum fields of {minimum_field_count:,} not met."
+                    f"SEVERE- RECORD ID: {record_id} - Number of fields are {len(doc):,} and minimum fields of {adjusted_minimum:,} not met."
                 )
     return status
 
