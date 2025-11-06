@@ -13,6 +13,7 @@ import glob
 import argparse
 import logging
 from datetime import datetime
+from ala import ala_helper
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +44,16 @@ class DOIInfo:
     provider:  must be DATACITE
     providerMetadata -> resourceType: enum[Image]
     """
+
     def __init__(self):
         today = date.today().strftime("%Y-%m-%d")
         self.provider = ''
-        self.title = 'Survey download records-'+today  # Survey download record_date
+        self.title = 'Survey download records-' + today  # Survey download record_date
         self.authors = 'Atlas Of Living Australia'
         self.description = ''
         self.applicationUrl = ''
         self.fileUrl = ''
-        self.licence = [] # same as dataset
+        self.licence = []  # same as dataset
         self.userId = ''
         self.provider = 'DATACITE'  # ONLY DATACITE now
         self.authorisedRoles = []
@@ -59,8 +61,12 @@ class DOIInfo:
         self.applicationMetadata = {"datasets": [], "qualityFilters": [], "searchUrl": "", "requestedOn": ""}
         #  request time - String
 
-        self.providerMetadata = {"contributors": [], "distributions": [], "creator": [],
-                                 "publisher": "Atlas Of Living Australia"}
+        self.providerMetadata = {
+            "contributors": [],
+            "distributions": [],
+            "creator": [],
+            "publisher": "Atlas Of Living Australia",
+        }
         # Provider cannot be null or empty
 
         self.customLandingPageUrl = ''
@@ -70,14 +76,14 @@ class DOIInfo:
         doi_info = DOIInfo()
         doi_info.description = collectory_info['description']
 
-        doi_info.add_provider_metadata('authors', ['Atlas Of Living Australia']) # Compulsory
-        doi_info.add_provider_metadata('title',  collectory_info['name'])
+        doi_info.add_provider_metadata('authors', ['Atlas Of Living Australia'])  # Compulsory
+        doi_info.add_provider_metadata('title', collectory_info['name'])
         doi_info.add_provider_metadata('resourceType', ResourceType.Dataset)
         doi_info.add_provider_metadata('resourceText', 'event info')
 
         # Append dataset
         # List of  {"uid","name", "licence","count"}
-        if collectory_info :
+        if collectory_info:
             dataset = {"uid": collectory_info["uid"], "name": collectory_info["name"]}
 
             if collectory_info.get("rights"):
@@ -105,7 +111,9 @@ class DOIInfo:
     def extra_provider_metadata(doi_info):
         # contributors: list of {name, type:'Distributor'}
         # name should be the dataset name
-        doi_info.providerMetadata["contributors"].append({"name":"User who created this download", "type":"Distributor"})
+        doi_info.providerMetadata["contributors"].append(
+            {"name": "User who created this download", "type": "Distributor"}
+        )
         # creator: list of {name, type:'Producer'}
         doi_info.providerMetadata["creator"].append({"name": "dataset name", "type": "Producer"})
 
@@ -135,7 +143,7 @@ class DOIService:
     def create(doi_server, apikey, doi_info):
         headers = {'content-type': 'application/json', 'apiKey': apikey}
         json_str = json.dumps(doi_info.__dict__)
-        response = requests.post(doi_server + '/api/doi', data=json_str, headers=headers)
+        response = ala_helper.http_request_with_retry("POST", doi_server + '/api/doi', data=json_str, headers=headers)
         if response.status_code == 200 or response.status_code == 201:
             result = response.json()
             return {'status': True, 'doi': result['doi'], 'uuid': result['uuid'], 'url': result['landingPage']}
@@ -145,16 +153,18 @@ class DOIService:
     @staticmethod
     # updated_info : JSON object.
     def update(doi_server, apikey, uuid, updated_info):
-        headers = {'content-type': 'application/json','apiKey': apikey}
-        data= json.dumps(updated_info)
-        response = requests.put(doi_server + '/api/doi/' + uuid, data=data, headers=headers)
+        headers = {'content-type': 'application/json', 'apiKey': apikey}
+        data = json.dumps(updated_info)
+        response = ala_helper.http_request_with_retry(
+            "PUT", doi_server + '/api/doi/' + uuid, data=data, headers=headers
+        )
         if response.status_code == 200 or response.status_code == 201:
             result = response.json()
             return {'status': True, 'doi': result['doi'], 'uuid': result['uuid']}
         else:
-            print("Status code: " + str(response.status_code) )
-            print("Status code: " + response.reason )
-            print("Status code: " + response.text )
+            print("Status code: " + str(response.status_code))
+            print("Status code: " + response.reason)
+            print("Status code: " + response.text)
             return {'status': False}
 
     @staticmethod
@@ -165,7 +175,9 @@ class DOIService:
 
         data = {'json': (None, json.dumps({}), 'application/json')}
 
-        response = requests.put(doi_server + '/api/doi/' + doi_id, files=files, data = data, headers=headers)
+        response = ala_helper.http_request_with_retry(
+            "PUT", doi_server + '/api/doi/' + doi_id, files=files, data=data, headers=headers
+        )
         if response.status_code == 200 or response.status_code == 201:
             result = response.json()
             return {'status': True, 'doi': result['doi'], 'uuid': result['uuid']}
@@ -173,14 +185,14 @@ class DOIService:
             return {'status': False}
 
     def list(doi_server):
-        response = requests.get(doi_server + '/api/doi')
+        response = ala_helper.http_request_with_retry("GET", doi_server + '/api/doi')
         return response
 
     # Cannot write file to S3
     # S3 does not offer file manipulation
     @staticmethod
     def generate_docs(doi_download_url, data_provider, data_provider_url, doi_info, dst_folder):
-        files = [dst_folder+"/doi.txt", dst_folder+"/README.HTML"]
+        files = [dst_folder + "/doi.txt", dst_folder + "/README.HTML"]
         try:
             with open(dst_folder + "/doi.txt", "w") as doi_file:
                 doi_file.write(doi_download_url)
@@ -193,11 +205,13 @@ class DOIService:
                 with open(readme_template_files[0], 'r') as file:
                     readme_template = file.read()
                     template = Template(readme_template)
-                    html_result = template.safe_substitute(search_query=doi_info.applicationMetadata["searchUrl"],
-                                                           query_time=doi_info.applicationMetadata["requestedOn"],
-                                                           doi_download_url = doi_download_url,
-                                                           data_provider = data_provider,
-                                                           data_provider_url=data_provider_url)
+                    html_result = template.safe_substitute(
+                        search_query=doi_info.applicationMetadata["searchUrl"],
+                        query_time=doi_info.applicationMetadata["requestedOn"],
+                        doi_download_url=doi_download_url,
+                        data_provider=data_provider,
+                        data_provider_url=data_provider_url,
+                    )
                     with open(dst_folder + "/README.HTML", "w") as readme_file:
                         readme_file.write(html_result)
             else:
@@ -221,16 +235,23 @@ class CollectoryService:
     def get_resource_info(collectory_server, dataset_uid):
         resource_url = f'{collectory_server}dataResource/{dataset_uid}'
         print('Using URL ' + resource_url)
-        response = requests.get(resource_url)
+        response = ala_helper.http_request_with_retry("GET", resource_url)
         if response.status_code == 200 or response.status_code == 201:
             result = response.json()
             provider = ''
             if result.get('provider'):
                 provider = result['provider'].get('name')
-            return {'status': True, 'uid': result['uid'], 'name': result['name'],
-                    'description': result['pubDescription'], 'websiteUrl': result['websiteUrl'],
-                    'alaPublicUrl': result['alaPublicUrl'],
-                    'provider': provider, 'rights': result.get('rights'), 'licenseType': result.get('licenseType')}
+            return {
+                'status': True,
+                'uid': result['uid'],
+                'name': result['name'],
+                'description': result['pubDescription'],
+                'websiteUrl': result['websiteUrl'],
+                'alaPublicUrl': result['alaPublicUrl'],
+                'provider': provider,
+                'rights': result.get('rights'),
+                'licenseType': result.get('licenseType'),
+            }
         else:
             print(f'Status code from collectory {response.status_code}')
             return {'status': False}
@@ -256,15 +277,14 @@ class S3Service:
     def generate_download_url(self, s3_bucket, dataset_id, file_id):
         file_key = 'exports/' + file_id + '/' + dataset_id + '.zip'
         s3_url = self.s3_client.generate_presigned_url(
-            ClientMethod='get_object',
-            Params={'Bucket': s3_bucket, 'Key': file_key},
-            ExpiresIn=86400)
+            ClientMethod='get_object', Params={'Bucket': s3_bucket, 'Key': file_key}, ExpiresIn=86400
+        )
         return s3_url
 
     def download_file(self, s3_bucket, dataset_id, file_id, dst_folder):
         file_key = 'exports/' + file_id + '/' + dataset_id + '.zip'
         dst_file = dst_folder + '/' + dataset_id + '-' + file_id + '.zip'
-        self.s3_client.download_file(s3_bucket, file_key, dst_file )
+        self.s3_client.download_file(s3_bucket, file_key, dst_file)
         if os.path.exists(dst_file):
             return dst_file
 
@@ -274,7 +294,7 @@ class S3Service:
         self.s3_client.upload_file(src_folder + '/' + dataset_id + '.zip', s3_bucket, file_key)
 
     # Upload file to s3, e.g. doi.txt
-    def upload_doc(self, s3_bucket,src_file, dst_file,):
+    def upload_doc(self, s3_bucket, src_file, dst_file):
         self.s3_client.upload_file(src_file, s3_bucket, dst_file)
 
     # Read URL generated by DOI
@@ -284,7 +304,7 @@ class S3Service:
         self.s3_client.download_fileobj(s3_bucket, doi_file, f)
         return json.loads(f.getvalue())
 
-    def get_size(self,s3_bucket, dataset_id, file_id):
+    def get_size(self, s3_bucket, dataset_id, file_id):
         file_key = 'exports/' + file_id + '/' + dataset_id + '.zip'
         response = self.s3_client.head_object(Bucket=s3_bucket, Key=file_key)
         size = response['ContentLength']
@@ -299,17 +319,19 @@ class S3Service:
 
 if __name__ == '__main__':
     """
-        args:
-        --user=Tester --OPTIONAL
-        --request_id=Request ID
-        --apiKey=API key from the corresponding auth server
-        --dataset_list="dr10487 dr18527"
-        --doi_server=https://doi-test.ala.org.au
-        --collectory_server=https://collections-test.ala.org.au
-        --s3_bucket=ala-extendeddata
-        --search_query=https://event.ala.org.au/search    
+    args:
+    --user=Tester --OPTIONAL
+    --request_id=Request ID
+    --apiKey=API key from the corresponding auth server
+    --dataset_list="dr10487 dr18527"
+    --doi_server=https://doi-test.ala.org.au
+    --collectory_server=https://collections-test.ala.org.au
+    --s3_bucket=ala-extendeddata
+    --search_query=https://event.ala.org.au/search
     """
-    parser = argparse.ArgumentParser(description='Append doi.txt, README.HTML to the generated data file and uploat it to S3, and finally create a DOI record')
+    parser = argparse.ArgumentParser(
+        description='Append doi.txt, README.HTML to the generated data file and uploat it to S3, and finally create a DOI record'
+    )
     parser.add_argument("--user")
     parser.add_argument("--request_id", type=str, required=True)
     parser.add_argument("--dataset_list", required=True)
@@ -378,8 +400,9 @@ if __name__ == '__main__':
                 if result['status']:
                     print("DOI Record created: " + result['url'])
                     # generate readme.html, doi.text and headers.csv
-                    docs = DOIService.generate_docs(result['url'], dataset_info['name'],
-                                                    dataset_info['alaPublicUrl'], doi_info, tmp_folder)
+                    docs = DOIService.generate_docs(
+                        result['url'], dataset_info['name'], dataset_info['alaPublicUrl'], doi_info, tmp_folder
+                    )
                     DOIService.append_docs_to_zip(docs, data_file)
 
                     # Create S3 client on AWS
@@ -418,5 +441,3 @@ if __name__ == '__main__':
             print(data_file + " does not exist.")
 
     print("Finished")
-
-

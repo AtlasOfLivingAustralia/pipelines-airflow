@@ -15,7 +15,12 @@ from airflow.utils.trigger_rule import TriggerRule
 from botocore.exceptions import ClientError
 
 from ala import ala_config
-from ala.ala_helper import get_default_args, get_success_notification_operator, get_metadata_as_json
+from ala.ala_helper import (
+    get_default_args,
+    get_success_notification_operator,
+    get_metadata_as_json,
+    download_file_with_retry,
+)
 
 load_images = "{{ dag_run.conf['load_images'] }}"
 override_uuid_percentage_check = "{{ dag_run.conf['override_uuid_percentage_check'] }}"
@@ -78,7 +83,7 @@ with DAG(
         print("URL to download: " + data_resource_content["connectionParameters"]["url"])
 
         if url_to_download.startswith("http"):
-            urllib.request.urlretrieve(url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip")
+            download_file_with_retry(url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip")
             upload_file(
                 f"/tmp/{dataset_uid}.zip", ala_config.S3_BUCKET_DWCA, f"dwca-imports/{dataset_uid}/{dataset_uid}.zip"
             )

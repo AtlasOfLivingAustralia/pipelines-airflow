@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time
 import zipfile
 from datetime import date, datetime, timedelta
 from enum import StrEnum
@@ -24,29 +25,183 @@ def strtobool(val: str) -> bool:
     return str(val).strip().lower() in {"y", "yes", "t", "true", "on", "1"}
 
 
+def http_request_with_retry(
+    method: str,
+    url: str,
+    max_retries: int = 3,
+    timeout: int = 60,
+    backoff_factor: float = 2.0,
+    retry_on_status: tuple = (500, 502, 503, 504, 429),
+    headers: dict = None,
+    **kwargs,
+) -> requests.Response:
+    """
+    Makes an HTTP request with exponential backoff retry logic.
+
+    Args:
+        method (str): HTTP method to use (GET, POST, PUT, DELETE, PATCH, HEAD).
+        url (str): The URL to send the request to.
+        max_retries (int, optional): Maximum number of retry attempts. Defaults to 3.
+        timeout (int, optional): Request timeout in seconds. Defaults to 60.
+        backoff_factor (float, optional): Multiplier for exponential backoff. Defaults to 2.0.
+        retry_on_status (tuple, optional): HTTP status codes that should trigger a retry. Defaults to (500, 502, 503, 504, 429).
+        headers (dict, optional): Optional HTTP headers to include in the request.
+        **kwargs: Additional arguments to pass to requests method (params, json, data, files, etc.).
+
+    Returns:
+        requests.Response: The response object resulting from the HTTP request.
+
+    Raises:
+        IOError: If all retry attempts fail or a non-retryable HTTP error occurs.
+        requests.exceptions.RequestException: For connection errors or other request-related issues.
+
+    Example:
+        # GET request
+        response = http_request_with_retry("GET", "https://api.example.com/data", headers={"Authorization": "Bearer token"})
+
+        # POST request
+        response = http_request_with_retry("POST", "https://api.example.com/submit", json={"key": "value"})
+
+        # With custom retry settings
+        response = http_request_with_retry("GET", url, max_retries=5, backoff_factor=1.5, timeout=120)
+    """
+    method = method.upper()
+    allowed_methods = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"}
+    if method not in allowed_methods:
+        raise ValueError(f"Invalid HTTP method: {method}. Must be one of {allowed_methods}")
+
+    last_exception = None
+    for attempt in range(max_retries + 1):
+        try:
+            log.info(f"HTTP {method} request to {url} (attempt {attempt + 1}/{max_retries + 1})")
+
+            # Make the request using the appropriate method
+            response = requests.request(method=method, url=url, headers=headers, timeout=timeout, **kwargs)
+
+            # Check if we should retry based on status code
+            if response.status_code in retry_on_status:
+                if attempt < max_retries:
+                    wait_time = backoff_factor**attempt
+                    log.warning(
+                        f"HTTP {response.status_code} error for {url}. Retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries + 1})"
+                    )
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    log.error(f"Max retries ({max_retries}) reached for {url} with status {response.status_code}")
+                    response.raise_for_status()
+
+            # If we get here, the request was successful (or failed with a non-retryable status)
+            response.raise_for_status()
+            log.info(f"HTTP {method} request to {url} succeeded with status {response.status_code}")
+            return response
+
+        except requests.exceptions.Timeout as err:
+            last_exception = err
+            if attempt < max_retries:
+                wait_time = backoff_factor**attempt
+                log.warning(
+                    f"Timeout for {url}. Retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries + 1})"
+                )
+                time.sleep(wait_time)
+            else:
+                log.error(f"Max retries ({max_retries}) reached for {url} due to timeout", exc_info=err)
+                raise IOError(f"Request to {url} timed out after {max_retries} retries") from err
+
+        except requests.exceptions.ConnectionError as err:
+            last_exception = err
+            if attempt < max_retries:
+                wait_time = backoff_factor**attempt
+                log.warning(
+                    f"Connection error for {url}. Retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries + 1})"
+                )
+                time.sleep(wait_time)
+            else:
+                log.error(f"Max retries ({max_retries}) reached for {url} due to connection error", exc_info=err)
+                raise IOError(f"Connection to {url} failed after {max_retries} retries") from err
+
+        except requests.exceptions.HTTPError as err:
+            last_exception = err
+            # Only retry on specific status codes
+            if err.response is not None and err.response.status_code not in retry_on_status:
+                log.error(f"Non-retryable HTTP error {err.response.status_code} for {url}", exc_info=err)
+                raise IOError(f"HTTP error {err.response.status_code} for {url}") from err
+            # If it's a retryable status code, we'll handle it in the next iteration
+            if attempt >= max_retries:
+                log.error(f"Max retries ({max_retries}) reached for {url}", exc_info=err)
+                raise IOError(f"Request to {url} failed after {max_retries} retries") from err
+
+        except requests.exceptions.RequestException as err:
+            last_exception = err
+            log.error(f"Request exception for {url}", exc_info=err)
+            raise IOError(f"Request to {url} failed: {str(err)}") from err
+
+    # This should never be reached, but just in case
+    if last_exception:
+        raise IOError(f"Request to {url} failed after {max_retries} retries") from last_exception
+    raise IOError(f"Request to {url} failed unexpectedly")
+
+
+def download_file_with_retry(url: str, local_path: str, max_retries: int = 3, timeout: int = 300) -> str:
+    """
+    Downloads a file from a URL to a local path with retry logic.
+
+    Args:
+        url (str): The URL to download the file from.
+        local_path (str): The local filesystem path where the file should be saved.
+        max_retries (int, optional): Maximum number of retry attempts. Defaults to 3.
+        timeout (int, optional): Request timeout in seconds. Defaults to 300 (5 minutes).
+
+    Returns:
+        str: The local path where the file was saved.
+
+    Raises:
+        IOError: If the download fails after all retry attempts.
+
+    Example:
+        local_file = download_file_with_retry("https://example.com/data.zip", "/tmp/data.zip")
+    """
+    try:
+        log.info(f"Downloading file from {url} to {local_path}")
+        response = http_request_with_retry("GET", url, max_retries=max_retries, timeout=timeout, stream=True)
+
+        # Save the file in chunks
+        with open(local_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+        log.info(f"Successfully downloaded file to {local_path}")
+        return local_path
+    except Exception as err:
+        log.error(f"Failed to download file from {url} to {local_path}", exc_info=err)
+        raise IOError(f"Failed to download file from {url}") from err
+
+
 def call_url(url, headers=None, timeout=60) -> requests.Response:
     """
     Sends a GET request to the specified URL with optional headers and returns the response.
+    Uses retry logic with exponential backoff for transient failures.
 
     Args:
         url (str): The URL to send the GET request to.
         headers (dict, optional): Optional HTTP headers to include in the request.
+        timeout (int, optional): Request timeout in seconds. Defaults to 60.
 
     Returns:
         requests.Response: The response object resulting from the GET request.
 
     Raises:
-        IOError: If an HTTP error occurs during the request.
+        IOError: If an HTTP error occurs during the request after all retries.
     """
     try:
         print(f"Calling URL: {url}")
-        with requests.get(url, headers=headers, timeout=timeout) as response:
-            response.raise_for_status()
-            print(f"Response: {response}")
-            return response
-    except requests.exceptions.HTTPError as err:
+        response = http_request_with_retry("GET", url, headers=headers, timeout=timeout)
+        print(f"Response: {response}")
+        return response
+    except IOError as err:
         logging.error("Error encountered during request %s", url, exc_info=err)
-        raise IOError(err) from err
+        raise
 
 
 def join_url(*url_fragments: str) -> str:
@@ -62,26 +217,35 @@ def join_url(*url_fragments: str) -> str:
 def json_parse(base_url: str, url_path: str, params=None, headers=None, method="GET"):
     """
     Calls the specified URL and returns the JSON response.
-    :param base_url: like https://collections.ala.org.au/ws
-    :param url_path: like /dataResource/dr000
-    :param params: is a dictionary of parameters to be passed to the API
-    :return: is the json response from the URL
-    """
+    Uses retry logic with exponential backoff for transient failures.
 
+    Args:
+        base_url (str): Base URL like https://collections.ala.org.au/ws
+        url_path (str): URL path like /dataResource/dr000
+        params (dict, optional): Dictionary of parameters to be passed to the API
+        headers (dict, optional): Optional HTTP headers to include in the request
+        method (str, optional): HTTP method to use (GET or POST). Defaults to GET.
+
+    Returns:
+        dict or bytes: JSON response from the URL (dict for GET, bytes for POST)
+
+    Raises:
+        IOError: If an HTTP error occurs during the request after all retries.
+    """
     try:
         full_url = join_url(base_url, url_path)
         if method == "GET":
-            with requests.get(full_url, params, headers=headers, timeout=60) as response:
-                response.raise_for_status()
-                json_result = json.loads(response.content)
-                return json_result
+            response = http_request_with_retry("GET", full_url, params=params, headers=headers, timeout=60)
+            json_result = json.loads(response.content)
+            return json_result
         elif method == "POST":
-            with requests.post(full_url, json=params, headers=headers, timeout=60) as response:
-                response.raise_for_status()
-                return response.content
-    except requests.exceptions.HTTPError as err:
+            response = http_request_with_retry("POST", full_url, json=params, headers=headers, timeout=60)
+            return response.content
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}. Use GET or POST.")
+    except IOError as err:
         logging.error("Error encountered during request %s with params %s", full_url, params, exc_info=err)
-        raise IOError(err)
+        raise
 
 
 def get_dr_count(dr: str):
