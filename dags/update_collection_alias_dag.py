@@ -198,7 +198,7 @@ with DAG(
 
     with TaskGroup(group_id="index_checks") as index_checks_task_grp:
         for check in checks_available:
-            (PythonOperator(task_id=check, python_callable=locals()[check], provide_context=True))
+            (PythonOperator(task_id=check, python_callable=locals()[check], provide_context=True, pool="solr_queries"))
     current_asserted_records_task >> index_checks_task_grp >> switch_collection_alias_op
     switch_collection_alias_op >> remove_old_collections_op
     remove_old_collections_op >> assertion_sync_task >> clear_dashboards_task
