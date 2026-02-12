@@ -15,7 +15,6 @@ for ((i = 2; i <= $#; i++ )); do
   sudo -u hadoop aws s3 sync /data/pipelines-data/$datasetId/1/identifiers/ s3://$s3_bucket/pipelines-data/$datasetId/identifiers-backup/
 
   echo "Uploading indexed record $datasetId"
-  sudo -u hadoop aws s3 rm s3://$s3_bucket/pipelines-all-datasets/index-record/$datasetId --recursive
   sudo -u hadoop aws s3 sync /data/pipelines-all-datasets/index-record/$datasetId s3://$s3_bucket/pipelines-all-datasets/index-record/$datasetId --delete
 done
 
