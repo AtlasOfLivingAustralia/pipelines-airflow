@@ -536,7 +536,7 @@ def check_spatial_layer_cl21(**kwargs):
 
 def check_representative_fields(**kwargs):
     parse_params(kwargs)
-    # Check all representative/duplicate related fields at facet level
+    # Check all representative/duplicate related fields by comparing total counts of non-null records
     fields_to_check = [
         "associatedOccurrences",
         "isRepresentativeOf",
@@ -547,14 +547,51 @@ def check_representative_fields(**kwargs):
 
     status_list = []
     for field in fields_to_check:
-        status = check_facet(field, f"{field}:*")
-        status_list.append(status)
+        # Get count of records with non-null values for this field in old collection
+        old_count = get_total_count(old_collection, solr_cluster=solr_base)
+        old_field_count_result = json_parse(
+            f"{old_collection}/select",
+            {"q": f"{field}:*", "rows": 0, "wt": "json", "facet": "false"},
+            solr_cluster=solr_base,
+        )
 
-    # Return FAIL if any check fails, otherwise return the worst status
+        # Get count of records with non-null values for this field in new collection
+        new_count = get_total_count(new_collection, solr_cluster=solr_base_new if solr_base_new else solr_base)
+        new_field_count_result = json_parse(
+            f"{new_collection}/select",
+            {"q": f"{field}:*", "rows": 0, "wt": "json", "facet": "false"},
+            solr_cluster=solr_base_new if solr_base_new else solr_base,
+        )
+
+        if old_field_count_result is None or new_field_count_result is None:
+            print(f"SEVERE- Error getting count for field {field}")
+            status_list.append(ResultStatus.FAIL)
+            continue
+
+        old_field_count = old_field_count_result["response"]["numFound"]
+        new_field_count = new_field_count_result["response"]["numFound"]
+        diff_count = new_field_count - old_field_count
+
+        # Compare counts similar to check_total_count logic
+        if new_field_count == old_field_count:
+            print(
+                f"INFO- Field '{field}': Equal number of records with non-null values. CURRENT#: {old_field_count:,} NEW#: {new_field_count:,} DIFF#: {diff_count:,}"
+            )
+            status_list.append(ResultStatus.PASS)
+        elif new_field_count > old_field_count:
+            print(
+                f"INFO- Field '{field}': More records with non-null values in new index. CURRENT#: {old_field_count:,} NEW#: {new_field_count:,} DIFF#: {diff_count:,}"
+            )
+            status_list.append(ResultStatus.PASS)
+        else:
+            print(
+                f"SEVERE- Field '{field}': Less records with non-null values in new index. CURRENT#: {old_field_count:,} NEW#: {new_field_count:,} DIFF#: {diff_count:,}"
+            )
+            status_list.append(ResultStatus.FAIL)
+
+    # Return FAIL if any check fails, otherwise return PASS
     if ResultStatus.FAIL in status_list:
         return ResultStatus.FAIL
-    elif ResultStatus.WARN in status_list:
-        return ResultStatus.WARN
     return ResultStatus.PASS
 
 
