@@ -2,8 +2,6 @@
 set -x
 s3_bucket=$1
 
-sudo chown hadoop:hadoop -R /data/la-pipelines/*
-
 function list_dr(){
   for ((i = 2; i <= $#; i++ )); do
     datasetId=${!i}
