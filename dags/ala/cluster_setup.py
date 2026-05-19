@@ -243,10 +243,12 @@ class EMRConfig:
                         },
                     }
                 ]
-        if ala_config.EMR_JAVA_HOME:
-            self.Steps += [
-                ala_helper.step_bash_cmd("Set default Java", f"sudo alternatives --set java {ala_config.EMR_JAVA_HOME}")
-            ]
+            if ala_config.EMR_JAVA_HOME and emr_version > 6:
+                self.Steps += [
+                    ala_helper.step_bash_cmd(
+                        "Set default Java", f"sudo alternatives --set java {ala_config.EMR_JAVA_HOME}"
+                    )
+                ]
 
 
 @dataclass
