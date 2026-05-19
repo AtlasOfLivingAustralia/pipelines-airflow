@@ -14,6 +14,8 @@ from airflow.operators.empty import EmptyOperator
 from airflow.providers.slack.notifications.slack import send_slack_notification
 from airflow.providers.slack.operators.slack import SlackAPIPostOperator
 from ala import ala_config
+from ala import jwt_auth
+
 
 log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
@@ -775,14 +777,22 @@ def get_assertion_records_count():
         return -1
 
 
-def get_metadata_as_json(registry_base_url, uid, ala_api_key):
+def get_auth_header(use_jwt):
+    if use_jwt:
+        auth = jwt_auth.Authenticator(
+            ala_config.AUTH_TOKEN_URL, ala_config.AUTH_CLIENT_ID, ala_config.AUTH_CLIENT_SECRET, ala_config.AUTH_SCOPE
+        )
+        return {"Authorization": f"Bearer {auth.get_token()}"}
+    else:
+        return {"Authorization": f"{ala_config.ALA_API_KEY}"}
+
+
+def get_metadata_as_json(uid):
     """
     Fetches metadata for a dataset from the registry (Collectory) using the API key.
 
     Args:
-        dataset_uid (str): The unique identifier of the dataset.
-        registry_url (str): The URL of the registry (Collectory).
-        ala_api_key (str): The API key for authentication.
+        uid (str): The unique identifier of the dataset.
 
     Returns:
         dict: The metadata of the dataset, or an error message if not found.
@@ -796,21 +806,19 @@ def get_metadata_as_json(registry_base_url, uid, ala_api_key):
         raise ValueError("Not a valid dataset or data provider uid: %s", uid)
 
     try:
-        jresponse = json_parse(registry_base_url, resource_path, headers={"Authorization": ala_api_key})
+        jresponse = json_parse(ala_config.COLLECTORY_SERVER, resource_path, headers=get_auth_header(ala_config.USE_JWT))
         return jresponse
     except Exception as e:
         print(f"Error fetching metadata for {uid}: {str(e)}")
         return {"error": str(e)}
 
 
-def update_registry_metadata(registry_base_url, uid, ala_api_key, metadata):
+def update_registry_metadata(uid, metadata):
     """
     Updates metadata for a dataset in the registry (Collectory) using the API key.
 
     Args:
-        registry_base_url (str): The base URL of the registry (Collectory).
         uid (str): The unique identifier of the dataset.
-        ala_api_key (str): The API key for authentication.
         metadata (dict): The metadata to update.
 
     Returns:
@@ -825,7 +833,11 @@ def update_registry_metadata(registry_base_url, uid, ala_api_key, metadata):
 
     try:
         jresponse = json_parse(
-            registry_base_url, resource_path, headers={"Authorization": ala_api_key}, method="POST", params=metadata
+            ala_config.COLLECTORY_SERVER,
+            resource_path,
+            headers=get_auth_header(ala_config.REGISTRY_USE_JWT),
+            method="POST",
+            params=metadata,
         )
         return jresponse
     except Exception as e:

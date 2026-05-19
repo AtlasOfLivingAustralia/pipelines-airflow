@@ -56,6 +56,7 @@ def setup_cluster_init(datasetIds, inst_type, extra_args, run_id_path, **kwargs)
                           {ala_config.BACKUP_LOCATION} \
                           {ala_config.COLLECTORY_SERVER} \
                           {ala_config.ALA_API_KEY} \
+                          {ala_config.REGISTRY_USE_JWT} \
                           {ala_config.SOLR_URL} \
                           '{extra_args}' \
                           {run_id_path}",
@@ -138,12 +139,7 @@ with DAG(
 
         def update_last_checked(dr_uid):
             try:
-                update_registry_metadata(
-                    ala_config.COLLECTORY_SERVER,
-                    dr_uid,
-                    ala_config.ALA_API_KEY,
-                    {'lastChecked': datetime.now().strftime("%Y-%m-%dT%H:%M:%S")},
-                )
+                update_registry_metadata(dr_uid, {'lastChecked': datetime.now().strftime("%Y-%m-%dT%H:%M:%S")})
                 log.info(f"Updated lastChecked for dr {dr_uid}")
             except Exception as e:
                 log.error(f"Error updating lastChecked for dr {dr_uid}: {e}")
@@ -156,7 +152,7 @@ with DAG(
                 update_last_checked(uid)
 
             elif uid.startswith("dp"):
-                md_json = get_metadata_as_json(ala_config.COLLECTORY_SERVER, uid, ala_config.ALA_API_KEY)
+                md_json = get_metadata_as_json(uid)
                 log.info(f"Going to update lastChecked for data resources in dp {uid}")
                 for dr in md_json.get("dataResources", []):
                     update_last_checked(dr['uid'])
