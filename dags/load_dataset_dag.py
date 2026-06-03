@@ -1,9 +1,10 @@
 import os
 import urllib
+from urllib.error import URLError
 
 import boto3
 from airflow import DAG
-from airflow.exceptions import AirflowSkipException
+from airflow.exceptions import AirflowSkipException, AirflowException
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.dates import days_ago
@@ -83,11 +84,18 @@ with DAG(
         print("URL to download: " + data_resource_content["connectionParameters"]["url"])
 
         if url_to_download.startswith("http"):
-            download_file_with_retry(url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip")
-            upload_file(
-                f"/tmp/{dataset_uid}.zip", ala_config.S3_BUCKET_DWCA, f"dwca-imports/{dataset_uid}/{dataset_uid}.zip"
-            )
-            os.remove(f"/tmp/{dataset_uid}.zip")
+            try:
+                download_file_with_retry(url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip")
+                #urllib.request.urlretrieve(url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip")
+                upload_file(
+                    f"/tmp/{dataset_uid}.zip",
+                    ala_config.S3_BUCKET_DWCA,
+                    f"dwca-imports/{dataset_uid}/{dataset_uid}.zip",
+                )
+                os.remove(f"/tmp/{dataset_uid}.zip")
+            except URLError as e:
+                print("Error in downloading from url %s: %s", url_to_download, e)
+                raise AirflowException("Refresh archive failed")
         else:
             print("URL to download is not HTTP or HTTPS")
             raise AirflowSkipException
@@ -177,7 +185,7 @@ with DAG(
         task_id="ingest_small_datasets_task",
         trigger_dag_id="Ingest_small_datasets",
         wait_for_completion=True,
-        trigger_rule=TriggerRule.NONE_SKIPPED,
+        trigger_rule=TriggerRule.ALL_SUCCESS,
         conf={
             "datasetIds": "{{ task_instance.xcom_pull(task_ids='process_small', key='return_value') }}",
             "skip_dwca_to_verbatim": "false",
@@ -191,7 +199,7 @@ with DAG(
         task_id="ingest_large_datasets_task",
         trigger_dag_id="Ingest_large_datasets",
         wait_for_completion=True,
-        trigger_rule=TriggerRule.NONE_SKIPPED,
+        trigger_rule=TriggerRule.ALL_SUCCESS,
         conf={
             "datasetIds": "{{ task_instance.xcom_pull(task_ids='process_large', key='return_value') }}",
             "skip_dwca_to_verbatim": "false",
@@ -205,7 +213,7 @@ with DAG(
         task_id="ingest_xlarge_datasets_task",
         trigger_dag_id="Ingest_large_datasets",
         wait_for_completion=True,
-        trigger_rule=TriggerRule.NONE_SKIPPED,
+        trigger_rule=TriggerRule.ALL_SUCCESS,
         conf={
             "datasetIds": "{{ task_instance.xcom_pull(task_ids='process_xlarge', key='return_value') }}",
             "skip_dwca_to_verbatim": "false",

@@ -51,7 +51,8 @@ MIN_DRS_PER_BATCH = int(Variable.get("min_drs_per_batch"))
 NO_OF_DATASET_BATCHES = int(Variable.get("no_of_dataset_batches"))
 NAME_MATCHING_URL = Variable.get("name_matching_url")
 REGISTRY_URL = COLLECTORY_SERVER
-PREINGESTION_AMI = Variable.get("preingestion_ami")
+REGISTRY_USE_JWT = Variable.get("registry_use_jwt", "false").lower() in ("true", "1", "t")
+# PREINGESTION_AMI = Variable.get("preingestion_ami")
 S3_ALA_UPLOADED_BUCKET = Variable.get("s3_bucket_ala_uploaded")
 S3_BACKUP_BUCKET = Variable.get("s3_bucket_backup")
 S3_BUCKET = Variable.get("s3_bucket")
@@ -84,6 +85,9 @@ ZK_URL = Variable.get("zk_url")
 EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get("ec2_additional_master_security_groups").split(",")
 EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get("ec2_additional_slave_security_groups").split(",")
 KEEP_EMR_ALIVE = Variable.get("keep_emr_alive_after_finish", "false").lower() in ("true", "1", "t")
+
+# if not set this will be relying on the current default java version
+EMR_JAVA_HOME = Variable.get("emr_java_home", "")
 
 
 def get_bootstrap_actions(bootstrap_script):
@@ -144,6 +148,7 @@ def get_bootstrap_config():
                 f"{SOLR_CONFIGSET}",  # 13
                 f"{ES_HOSTS}",  # 14
                 f"{ES_ALIAS}",  # 15
+                f"{EMR_JAVA_HOME}",  # 16
             ],
             "Path": f"s3://{S3_BUCKET}/airflow/dags/sh/bootstrap-la-pipelines-config.sh",
         },

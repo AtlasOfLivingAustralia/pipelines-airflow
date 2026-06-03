@@ -6,7 +6,7 @@ from enum import Enum
 from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator, EmrCreateJobFlowOperator
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor, EmrStepSensor
-from ala import ala_config
+from ala import ala_config, ala_helper
 from ala.ala_helper import get_dr_count, get_success_notification_operator, step_bash_cmd
 
 
@@ -182,6 +182,7 @@ class EMRConfig:
         "Tags",
         "LogUri",
         "Instances",
+        "Steps",
     ]
     ReleaseLabel: str
     Configurations: list
@@ -198,6 +199,7 @@ class EMRConfig:
         ],
         init=False,
     )
+    Steps: list = field(default_factory=lambda: [], init=False)
 
     @property
     def Name(self) -> str:
@@ -228,14 +230,19 @@ class EMRConfig:
             {"Key": "Name", "Value": sanitize_tag(sanitize_name(self.Name))},
             {"Key": "data-resources", "Value": sanitize_tag(sanitize_name(self.data_resources))},
         ]
-        self.BootstrapActions += [
-            {
-                "Name": "CloudWatch Agent",
-                "ScriptBootstrapAction": {
-                    "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/sh/bootstrap-cloudwatch-agent.sh"
-                },
-            }
-        ]
+        emr_version_match = re.findall(r"emr-(\d+)", self.ReleaseLabel, re.IGNORECASE)
+        if len(emr_version_match) > 0:
+            emr_version = int(emr_version_match[0])
+            # TODO: Cater for cloudwatch agent for EMR 7
+            if emr_version < 6:
+                self.BootstrapActions += [
+                    {
+                        "Name": "CloudWatch Agent",
+                        "ScriptBootstrapAction": {
+                            "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/sh/bootstrap-cloudwatch-agent.sh"
+                        },
+                    }
+                ]
 
 
 @dataclass
@@ -255,7 +262,7 @@ class PreIngestionEMRConfig(EMRConfig):
                 "Market": ala_config.MASTER_MARKET,
                 "InstanceRole": "MASTER",
                 "InstanceType": self.instance_type,
-                "CustomAmiId": ala_config.PREINGESTION_AMI,
+                # "CustomAmiId": ala_config.PREINGESTION_AMI,
                 "InstanceCount": 1,
                 "EbsConfiguration": {
                     "EbsBlockDeviceConfigs": [

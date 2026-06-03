@@ -23,7 +23,7 @@ def get_dwca_steps(dataset_list):
     return [
         step_bash_cmd(
             "a. Download data",
-            f" /tmp/download-datasets.sh {ala_config.S3_BUCKET_DWCA} {ala_config.S3_BUCKET_AVRO}  {dataset_list}",
+            f" /tmp/download-datasets.sh {ala_config.S3_BUCKET_DWCA} {ala_config.S3_BUCKET_AVRO} {dataset_list}",
         ),
         step_bash_cmd("b. DwCA to Verbatim", f" la-pipelines dwca-avro {dataset_list}"),
     ]
@@ -38,7 +38,6 @@ def get_avro_steps(dataset_list):
 
 
 def get_pre_image_steps(dataset_list, override_uuid_percentage=False):
-
     extra_args = ""
     if override_uuid_percentage:
         extra_args = '--extra-args="overridePercentageCheck=true"'
