@@ -148,6 +148,7 @@ def get_bootstrap_config():
                 f"{SOLR_CONFIGSET}",  # 13
                 f"{ES_HOSTS}",  # 14
                 f"{ES_ALIAS}",  # 15
+                f"{EMR_JAVA_HOME}",  # 16
             ],
             "Path": f"s3://{S3_BUCKET}/airflow/dags/sh/bootstrap-la-pipelines-config.sh",
         },
