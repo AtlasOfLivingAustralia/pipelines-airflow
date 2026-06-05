@@ -135,8 +135,8 @@ The following Airflow Variables must be configured for the repository to functio
 | Variable | Example Value | Purpose |
 |----------|---------------|---------|
 | `s3_bucket_dwca` | `<s3_bucket>` | S3 bucket for Darwin Core Archive files |
-| `s3_bucket_dwca_exports` | `<s3_exports_bucket>` | S3 bucket for DwCA exports |
-| `s3_bucket_ala_uploaded` | `<s3_uploaded_bucket>` | S3 bucket for user-uploaded datasets |
+| `s3_bucket_backup` | `<s3_bucket>` | S3 bucket for Preingestion fetchers downloads of source data |
+| `s3_bucket_dwca_exports` | `<s3_exports_bucket>` | S3 bucket for Darwin Core Archive exports |
 | `preingestion_ebs_size_in_gb` | `50` | EBS size for pre-ingestion instances |
 | `dr_rec_count_threshold` | `100000` | Record count threshold for processing decisions |
 | `master_market` | `ON_DEMAND` | EC2 market type for master nodes |

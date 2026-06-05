@@ -71,7 +71,7 @@ def http_request_with_retry(
     """
     method = method.upper()
     if method not in ALLOWED_METHODS:
-        raise ValueError(f"Invalid HTTP method: {method}. Must be one of {allowed_methods}")
+        raise ValueError(f"Invalid HTTP method: {method}. Must be one of {ALLOWED_METHODS}")
 
     last_exception = None
     for attempt in range(max_retries + 1):

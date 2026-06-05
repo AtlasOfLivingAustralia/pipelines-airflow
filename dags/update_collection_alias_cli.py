@@ -93,7 +93,7 @@ def get_total_count(collection: str, solr_cluster: str):
     return result["response"]["numFound"]
 
 
-def check_minimum_field_count(minimum_field_count: int, record_id: str, collection):
+def check_minimum_field_count(min_field_count: int, record_id: str, collection):
     status = ResultStatus.PASS
     result = json_parse(
         f"{collection}/select",
@@ -102,7 +102,7 @@ def check_minimum_field_count(minimum_field_count: int, record_id: str, collecti
     )
     if result is None:
         print(
-            f"SEVERE- Error checking minimum fields count. : minFieldCount: {minimum_field_count:,}, recordId: {record_id}, collection: {collection}"
+            f"SEVERE- Error checking minimum fields count. : minFieldCount: {min_field_count:,}, recordId: {record_id}, collection: {collection}"
         )
         status = ResultStatus.FAIL
     else:
@@ -117,12 +117,10 @@ def check_minimum_field_count(minimum_field_count: int, record_id: str, collecti
             )
         else:
             doc = docs[0]
-            # Use minimum of 8 fields for records with IDs containing '://' (e.g., DOI URLs)
-            adjusted_minimum = 8 if "://" in record_id else minimum_field_count
-            if len(doc) < adjusted_minimum:
+            if len(doc) < min_field_count:
                 status = ResultStatus.FAIL
                 print(
-                    f"SEVERE- RECORD ID: {record_id} - Number of fields are {len(doc):,} and minimum fields of {adjusted_minimum:,} not met."
+                    f"SEVERE- RECORD ID: {record_id} - Number of fields are {len(doc):,} and minimum fields of {min_field_count:,} not met."
                 )
     return status
 
@@ -169,21 +167,27 @@ def compare_records(record_id: str):
     else:
         new_doc = new_docs[0]
         old_doc = old_docs[0]
-        missing_field_set = old_doc.keys() - assertion_fields - representative_fields - new_doc.keys()
+        exclude_fields = []
+        exclude_fields.extend(assertion_fields)
+        exclude_fields.extend(representative_fields)
+        missing_field_set = old_doc.keys() - exclude_fields - new_doc.keys()
         if len(missing_field_set):
             print(
                 f"SEVERE- RECORD ID:{record_id} - There are {len(missing_field_set):,} fields which are missing in the new records. Here is the list: {missing_field_set}"
             )
             return ResultStatus.FAIL
         else:
+            # Exclude these lastProcessedDate and lastLoadDate fields which are expected to change from data loads or reinterpretation anyway
+            exclude_fields.extend(["lastProcessedDate", "lastLoadDate"])
             changed_fields = []
             new_changed_fields = []
             for key, value in new_doc.items():
-                if key in old_doc:
-                    if value is not None and value != old_doc[key]:
-                        changed_fields.append({"field": key, "old": old_doc[key], "new": value})
-                else:
-                    new_changed_fields.append({"field": key, "old": "None", "new": value})
+                if key not in exclude_fields:
+                    if key in old_doc:
+                        if value is not None and value != old_doc[key]:
+                            changed_fields.append({"field": key, "old": old_doc[key], "new": value})
+                    else:
+                        new_changed_fields.append({"field": key, "old": "None", "new": value})
             if len(changed_fields):
                 status = ResultStatus.WARN
                 print(
@@ -240,12 +244,14 @@ def check_min_fields_for_random_records(**kwargs):
         )
     else:
         ret_status = ResultStatus.PASS
-        print(f"INFO- All {records_number:,} records checks passed successfully.")
+        print(f"INFO- All {records_number:,} records checks passed successfully for check min fields.")
 
     return ret_status
 
 
 def get_facet_data(collection: str, facet_field: str, q: str, facet_limit: int, sort: str, solr_cluster: str):
+    exclude_doi_query = "-_nest_parent_:*"
+    q = f"{q} AND {exclude_doi_query}" if q else exclude_doi_query
     result = json_parse(
         f"{collection}/select",
         {
@@ -439,7 +445,7 @@ def check_compare_random_records(**kwargs):
             )
         else:
             ret_status = ResultStatus.PASS
-            print(f"INFO- All {len(record_ids):,} records checks passed successfully.")
+            print(f"INFO- All {len(record_ids):,} records checks passed successfully for check_compare_random_records.")
     return ret_status
 
 
@@ -723,7 +729,7 @@ def main():
     parser = argparse.ArgumentParser(description="Creates Solr Collection")
     parser.add_argument("-s", "--solr_base", help="Solr url eg: http://localhost:8983/solr", required=True)
     parser.add_argument(
-        "-l", "--solr_base_new", help="Solr url for another cluster to compare with the solar_base", default=None
+        "-l", "--solr_base_new", help="Solr url for another cluster to compare with the solr_base", default=None
     )
     parser.add_argument("-n", "--new_collection", help="New Solr collection", required=True)
     parser.add_argument("-o", "--old_collection", help="Old Solr collection", default="biocache")
