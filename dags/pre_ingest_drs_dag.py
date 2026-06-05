@@ -53,7 +53,7 @@ def setup_cluster_init(datasetIds, inst_type, extra_args, run_id_path, **kwargs)
                           {dr} \
                           {hdfs_s3_dwca_loc} \
                           {dwca_loc} \
-                          {ala_config.BACKUP_LOCATION} \
+                          {ala_config.S3_BACKUP_BUCKET} \
                           {ala_config.COLLECTORY_SERVER} \
                           {ala_config.ALA_API_KEY} \
                           {ala_config.REGISTRY_USE_JWT} \

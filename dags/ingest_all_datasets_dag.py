@@ -56,7 +56,7 @@ def check_args(**kwargs):
 
 def list_datasets_in_bucket_callable(**kwargs):
     if strtobool(kwargs["dag_run"].conf["skip_dwca_to_verbatim"]):
-        kwargs["bucket"] = kwargs["bucket_avro"]
+        # kwargs["bucket"] = kwargs["bucket_avro"]
         return ala_helper.list_drs_verbatim_avro_in_bucket(**kwargs)
     else:
         return ala_helper.list_drs_dwca_in_bucket(**kwargs)

@@ -21,6 +21,8 @@ from ala import jwt_auth
 log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
 
+ALLOWED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"}
+
 
 def strtobool(val: str) -> bool:
     """Lightweight, non-deprecated alternative to distutils.util.strtobool."""
@@ -68,8 +70,7 @@ def http_request_with_retry(
         response = http_request_with_retry("GET", url, max_retries=5, backoff_factor=1.5, timeout=120)
     """
     method = method.upper()
-    allowed_methods = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"}
-    if method not in allowed_methods:
+    if method not in ALLOWED_METHODS:
         raise ValueError(f"Invalid HTTP method: {method}. Must be one of {allowed_methods}")
 
     last_exception = None
@@ -630,7 +631,7 @@ def list_drs_verbatim_avro_in_bucket(**kwargs):
     """
 
     return list_objects_in_bucket(
-        kwargs["bucket"],
+        kwargs["bucket_avro"],
         "pipelines-data/",
         r"^.*/dr[0-9]+/1/verbatim/verbatim+[\-0-9of]*\.avro$",
         sub_dr_folder="",
