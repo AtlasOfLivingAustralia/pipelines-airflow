@@ -608,6 +608,19 @@ def switch_collection_alias(**kwargs):
         print(f"INFO- Switching collection alias is skipped as the run_checks_only param set to {run_checks_only}")
         ret_status = ResultStatus.SKIP
     else:
+        # Rebalance leaders of the new collection before pointing the alias to it
+        result = json_parse(
+            "admin/collections",
+            {"action": "REBALANCELEADERS", "collection": new_collection, "wt": "json", },
+            solr_cluster=solr_base,
+        )
+        if result is None:
+            print(f"WARNING- Error in re-balancing collections before switching alias. collection:{new_collection}")
+            ret_status = ResultStatus.WARN
+        else:
+            print(f"PASS- Re-balanced collections successfully for collection:{new_collection}")
+
+        # Now, switch the alias to point to the new collection
         result = json_parse(
             "admin/collections",
             {"action": "CREATEALIAS", "collections": new_collection, "name": solr_alias, "wt": "json"},
@@ -617,16 +630,11 @@ def switch_collection_alias(**kwargs):
             print(f"SEVERE- Error in switching alias {solr_alias} with collection:{new_collection}")
             ret_status = ResultStatus.FAIL
         elif result["responseHeader"]["status"] == 0:
-            print(f"PASS- The {solr_alias} alias is update successfully and now pointing to {new_collection}.")
-            result = json_parse(
-                "admin/collections",
-                {"action": "REBALANCELEADERS", "collection": new_collection, "wt": "json"},
-                solr_cluster=solr_base,
+            print(
+                f"PASS- The {solr_alias} alias is update successfully and now pointing to {new_collection}."
             )
-            if result is None:
-                print(f"SEVERE- Error in re-balancing collections. collection:{new_collection}")
-                ret_status = ResultStatus.WARN
-            else:
+            # Maintain ResultStatus.WARN if rebalance failed, otherwise ResultStatus.PASS
+            if ret_status != ResultStatus.WARN:
                 ret_status = ResultStatus.PASS
         else:
             print(
