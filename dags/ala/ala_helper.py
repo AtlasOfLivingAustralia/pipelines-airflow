@@ -7,7 +7,6 @@ import time
 import zipfile
 from datetime import date, datetime, timedelta
 from enum import StrEnum
-from urllib.parse import urlparse
 
 import boto3
 import requests
@@ -485,6 +484,54 @@ def step_cmd_args(step_name, cmd_arr, action_on_failure="TERMINATE_CLUSTER"):
     }
 
 
+def list_folders_in_bucket(s3, bucket_name, obj_prefix, delimiter, regex):
+    # session = boto3.Session()
+    # s3 = session.client("s3")
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter)
+    folders = []
+    while True:
+        folders += [o.get("Prefix").split("/")[-2] for o in response.get("CommonPrefixes")]
+
+        # Check if there are more results to retrieve
+        if response.get("NextContinuationToken"):
+            # Make another request with the continuation token
+            response = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=obj_prefix,
+                Delimiter=delimiter,
+                ContinuationToken=response.get("NextContinuationToken"),
+            )
+        else:
+            break
+
+    dr_pattern = re.compile(regex)
+    drs = [dr for dr in list(filter(dr_pattern.match, folders)) if dr not in ala_config.EXCLUDED_DATASETS]
+    return drs
+
+
+def process_prefix(s3, bucket_name, l_prefix, l_dr, obj_key_regex, time_range):
+    # session = boto3.Session()
+    # s3 = session.client("s3")
+    results = {}
+    paginator = s3.get_paginator("list_objects_v2")
+    page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=l_prefix)
+
+    for page in page_iterator:
+        for my_bucket_object in page.get("Contents", []):
+            matches = list(re.findall(obj_key_regex, my_bucket_object["Key"]))
+            if matches:
+                lower_range = True
+                higher_range = True
+                if time_range[0]:
+                    lower_range = my_bucket_object["LastModified"].isoformat() >= time_range[0]
+                if time_range[1]:
+                    higher_range = my_bucket_object["LastModified"].isoformat() <= time_range[1]
+                if lower_range and higher_range:
+                    results[l_dr] = my_bucket_object["Size"]
+
+    return results
+
+
 def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder="", time_range=(None, None)):
     """
     Lists and aggregates the sizes of objects in an S3 bucket that match a given key regex,
@@ -502,59 +549,17 @@ def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder
         dict: A dictionary where keys are dataset folder names (e.g., "dr123") and values are the
             total size (in bytes) of matching objects within each folder, sorted in descending order by size.
     """
-
-    def list_folders_in_bucket(bucket_name, obj_prefix, delimiter, regex):
-        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter)
-        folders = []
-        while True:
-            folders += [o.get("Prefix").split("/")[-2] for o in response.get("CommonPrefixes")]
-
-            # Check if there are more results to retrieve
-            if response.get("NextContinuationToken"):
-                # Make another request with the continuation token
-                response = s3.list_objects_v2(
-                    Bucket=bucket_name,
-                    Prefix=obj_prefix,
-                    Delimiter=delimiter,
-                    ContinuationToken=response.get("NextContinuationToken"),
-                )
-            else:
-                break
-
-        dr_pattern = re.compile(regex)
-        drs = [dr for dr in list(filter(dr_pattern.match, folders)) if dr not in ala_config.EXCLUDED_DATASETS]
-        return drs
-
-    def process_prefix(l_prefix, l_dr):
-        results = {}
-        paginator = s3.get_paginator("list_objects_v2")
-        page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=l_prefix)
-
-        for page in page_iterator:
-            for my_bucket_object in page.get("Contents", []):
-                matches = list(re.findall(obj_key_regex, my_bucket_object["Key"]))
-                if matches:
-                    lower_range = True
-                    higher_range = True
-                    if time_range[0]:
-                        lower_range = my_bucket_object["LastModified"].isoformat() >= time_range[0]
-                    if time_range[1]:
-                        higher_range = my_bucket_object["LastModified"].isoformat() <= time_range[1]
-                    if lower_range and higher_range:
-                        results[l_dr] = my_bucket_object["Size"]
-
-        return results
+    session = boto3.Session()
+    s3 = session.client("s3")
 
     log.info("Reading from bucket: %s", bucket_name)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        session = boto3.Session()
-        s3 = session.client("s3")
-        drs = list_folders_in_bucket(bucket_name, obj_prefix, delimiter="/", regex=r"^dr[0-9]+$")
+        drs = list_folders_in_bucket(s3, bucket_name, obj_prefix, delimiter="/", regex=r"^dr[0-9]+$")
         futures = []
         for dr in drs:
             prefix = f"{obj_prefix}{dr}/{sub_dr_folder}"
-            futures.append(executor.submit(process_prefix, prefix, dr))
+            futures.append(executor.submit(process_prefix, s3, bucket_name, prefix, dr, obj_prefix, time_range))
         datasets = {}
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
@@ -586,6 +591,35 @@ def list_drs_dwca_in_bucket(**kwargs):
         that match the pattern 'dr[0-9]+.zip'.
     """
     return list_objects_in_bucket(kwargs["bucket"], "dwca-imports/", r"^.*/(dr[0-9]+)\.zip$", sub_dr_folder="")
+
+
+def filter_drs_with_verbatim(dwca_drs, **kwargs):
+    session = boto3.Session()
+    s3 = session.client("s3")
+    obj_prefix = "pipelines-data/"
+    avro_folders = list_folders_in_bucket(
+        s3=s3, bucket_name=kwargs["bucket_avro"], obj_prefix=obj_prefix, delimiter="/", regex=r"^dr[0-9]+$"
+    )
+    orphaned_avro_folders = list(set(avro_folders) - set(dwca_drs.keys()))
+    files = []
+    for folder in orphaned_avro_folders:
+        file = process_prefix(
+            s3=s3,
+            bucket_name=kwargs["bucket_avro"],
+            l_prefix=f"{obj_prefix}{folder}/1/verbatim/",
+            l_dr=folder,
+            obj_key_regex=r"^.*/verbatim+[\-0-9of]*\.avro$",
+            time_range=(None, None) if "time_range" not in kwargs else kwargs["time_range"],
+        )
+        if len(file) > 0:
+            files.append(file)
+            # These files may not be ingested as their dwca does not exist
+            print(files)
+
+    datasets_without_verbatims = list(set(dwca_drs.keys()) - set(avro_folders))
+    print(f"These datasets are without verbatims: {datasets_without_verbatims}")
+    filtered_drs = {k: v for k, v in dwca_drs.items() if k not in datasets_without_verbatims}
+    return filtered_drs
 
 
 def list_drs_index_avro_in_bucket(**kwargs):

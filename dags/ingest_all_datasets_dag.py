@@ -25,14 +25,22 @@ from airflow.decorators import task
 
 from ala import ala_helper, ala_config
 from ala.ala_helper import strtobool
+from collections import OrderedDict
 
 excluded_datasets = ala_config.EXCLUDED_DATASETS
 
 DAG_ID = "Ingest_all_datasets"
 
+MAX_SMALL_INGEST_DATASET_SIZE = 5000000  # Maximum size for dataset to be considered as small ingest (dwca size)
+MIN_XLARGE_INGEST_DATASET_SIZE = 1000000000  # Minimum size for dataset to be considered as xlarge ingest (dwca size)
+
 # Thresholds control cumulative total size per category (ascending order of capacity)
-SMALL_TOTAL_THRESHOLD = ala_config.EMR_SMALL_CLUSTER_TOTAL_THRESHOLD
-LARGE_TOTAL_THRESHOLD = ala_config.EMR_LARGE_CLUSTER_TOTAL_THRESHOLD
+SMALL_TOTAL_THRESHOLD = (
+    ala_config.EMR_SMALL_CLUSTER_TOTAL_THRESHOLD if ala_config.EMR_SMALL_CLUSTER_TOTAL_THRESHOLD > 0 else None
+)
+LARGE_TOTAL_THRESHOLD = (
+    ala_config.EMR_LARGE_CLUSTER_TOTAL_THRESHOLD if ala_config.EMR_LARGE_CLUSTER_TOTAL_THRESHOLD > 0 else None
+)
 
 SMALL_INGEST_TASKS = ala_config.EMR_SMALL_CLUSTER_NODE_COUNT
 LARGE_INGEST_TASKS = ala_config.EMR_LARGE_CLUSTER_NODE_COUNT
@@ -55,11 +63,93 @@ def check_args(**kwargs):
 
 
 def list_datasets_in_bucket_callable(**kwargs):
+    dwca_drs = ala_helper.list_drs_dwca_in_bucket(**kwargs)
     if strtobool(kwargs["dag_run"].conf["skip_dwca_to_verbatim"]):
-        # kwargs["bucket"] = kwargs["bucket_avro"]
-        return ala_helper.list_drs_verbatim_avro_in_bucket(**kwargs)
-    else:
-        return ala_helper.list_drs_dwca_in_bucket(**kwargs)
+        # Some datasets do not have verbatims. The avros might have been deleted but the dwcas were retained.
+        return ala_helper.filter_drs_with_verbatim(dwca_drs, **kwargs)
+
+    return dwca_drs
+
+
+def add_datasets_to_partition(datasets, category, cluster_count, threshold, ti):
+    remaining = datasets.copy()
+    # remaining = sorted(datasets.items(), key=lambda kv: (kv[1], kv[0]))  # ascending by size then id
+    # logging.info(
+    #    "[partition] Starting with %d datasets (min_size=%s, max_size=%s)",
+    #    len(remaining),
+    #    remaining[0][1] if remaining else None,
+    #    remaining[-1][1] if remaining else None,
+    # )
+
+    # for category, cluster_count, threshold in category_specs:
+    logging.info(
+        "[partition] Category=%s clusters=%d threshold=%s remaining_before=%d",
+        category,
+        cluster_count,
+        threshold if threshold is not None else "unbounded",
+        len(remaining),
+    )
+    # Initialize cluster tracking
+    cluster_sizes = [0] * cluster_count
+    cluster_ds = [[] for _ in range(cluster_count)]
+
+    if not remaining:
+        # Still push empty batches for downstream templating consistency
+        for idx in range(1, cluster_count + 1):
+            ti.xcom_push(key=f"process_{category}_batch{idx}", value="")
+        ti.xcom_push(key=f"process_{category}", value="")
+        return
+        # continue
+
+    # Round-robin layered assignment
+    pass_index = 0
+    while remaining:
+        assigned_in_pass = False
+        for cluster_index in range(cluster_count):
+            if not remaining:
+                break
+            ds_id, size = remaining.popitem(last=False)  # remaining[0]  # always consider current smallest remaining
+            if threshold is not None and cluster_sizes[cluster_index] + size > threshold:
+                continue
+            cluster_ds[cluster_index].append(ds_id)
+            cluster_sizes[cluster_index] += size
+            # remaining.pop(0)
+            assigned_in_pass = True
+        if not assigned_in_pass:
+            logging.info(
+                "[partition] Category=%s stopping: smallest dataset size=%s does not fit any cluster (filled_sizes=%s)",
+                category,
+                remaining[0][1] if remaining else None,
+                cluster_sizes,
+            )
+            break
+        pass_index += 1
+        if pass_index % 5 == 0:
+            logging.info(
+                "[partition] Category=%s progress: pass=%d remaining=%d cluster_sizes=%s",
+                category,
+                pass_index,
+                len(remaining),
+                cluster_sizes,
+            )
+
+    category_map = {ds_id: datasets[ds_id] for sub in cluster_ds for ds_id in sub}
+    ti.xcom_push(key=f"process_{category}", value=category_map)
+
+    for idx, ds_list in enumerate(cluster_ds, start=1):
+        batch_value = " ".join(ds_list)
+        ti.xcom_push(key=f"process_{category}_batch{idx}", value=batch_value)
+    logging.info(
+        "[partition] Category=%s assigned_datasets=%d total_size=%s cluster_sizes=%s remaining_after=%d",
+        category,
+        len(category_map),
+        sum(category_map.values()),
+        cluster_sizes,
+        len(remaining),
+    )
+
+    # If we filled zero datasets (all empty) ensure empty strings pushed (already done above)
+    # Continue loop to next category with any remaining datasets.
 
 
 def partition_datasets_callable(**kwargs):
@@ -81,88 +171,35 @@ def partition_datasets_callable(**kwargs):
     if not datasets:
         raise AirflowSkipException("No datasets discovered")
 
-    remaining = sorted(datasets.items(), key=lambda kv: (kv[1], kv[0]))  # ascending by size then id
-    logging.info(
-        "[partition] Starting with %d datasets (min_size=%s, max_size=%s)",
-        len(remaining),
-        remaining[0][1] if remaining else None,
-        remaining[-1][1] if remaining else None,
+    small_drs = OrderedDict(
+        sorted((item for item in datasets.items() if item[1] < MAX_SMALL_INGEST_DATASET_SIZE), key=lambda x: x[1])
+    )
+
+    large_drs = OrderedDict(
+        sorted(
+            (
+                item
+                for item in datasets.items()
+                if MAX_SMALL_INGEST_DATASET_SIZE < item[1] < MIN_XLARGE_INGEST_DATASET_SIZE
+            ),
+            key=lambda x: x[1],
+        )
+    )
+
+    xlarge_drs = OrderedDict(
+        sorted((item for item in datasets.items() if item[1] >= MIN_XLARGE_INGEST_DATASET_SIZE), key=lambda x: x[1])
     )
 
     category_specs = [
-        ("small", SMALL_INGEST_TASKS, SMALL_TOTAL_THRESHOLD),
-        ("large", LARGE_INGEST_TASKS, LARGE_TOTAL_THRESHOLD),
-        ("xlarge", XLARGE_INGEST_TASKS, None),  # None => unlimited
+        ("small", SMALL_INGEST_TASKS, SMALL_TOTAL_THRESHOLD, small_drs),
+        ("large", LARGE_INGEST_TASKS, LARGE_TOTAL_THRESHOLD, large_drs),
+        ("xlarge", XLARGE_INGEST_TASKS, None, xlarge_drs),  # None => unlimited
     ]
 
-    for category, cluster_count, threshold in category_specs:
-        logging.info(
-            "[partition] Category=%s clusters=%d threshold=%s remaining_before=%d",
-            category,
-            cluster_count,
-            threshold if threshold is not None else "unbounded",
-            len(remaining),
+    for category, cluster_count, threshold, drs in category_specs:
+        add_datasets_to_partition(
+            datasets=drs, category=category, cluster_count=cluster_count, threshold=threshold, ti=ti
         )
-        # Initialize cluster tracking
-        cluster_sizes = [0] * cluster_count
-        cluster_ds = [[] for _ in range(cluster_count)]
-
-        if not remaining:
-            # Still push empty batches for downstream templating consistency
-            for idx in range(1, cluster_count + 1):
-                ti.xcom_push(key=f"process_{category}_batch{idx}", value="")
-            ti.xcom_push(key=f"process_{category}", value="")
-            continue
-
-        # Round-robin layered assignment
-        pass_index = 0
-        while remaining:
-            assigned_in_pass = False
-            for cluster_index in range(cluster_count):
-                if not remaining:
-                    break
-                ds_id, size = remaining[0]  # always consider current smallest remaining
-                if threshold is not None and cluster_sizes[cluster_index] + size > threshold:
-                    continue
-                cluster_ds[cluster_index].append(ds_id)
-                cluster_sizes[cluster_index] += size
-                remaining.pop(0)
-                assigned_in_pass = True
-            if not assigned_in_pass:
-                logging.info(
-                    "[partition] Category=%s stopping: smallest dataset size=%s does not fit any cluster (filled_sizes=%s)",
-                    category,
-                    remaining[0][1] if remaining else None,
-                    cluster_sizes,
-                )
-                break
-            pass_index += 1
-            if pass_index % 5 == 0:
-                logging.info(
-                    "[partition] Category=%s progress: pass=%d remaining=%d cluster_sizes=%s",
-                    category,
-                    pass_index,
-                    len(remaining),
-                    cluster_sizes,
-                )
-
-        category_map = {ds_id: datasets[ds_id] for sub in cluster_ds for ds_id in sub}
-        ti.xcom_push(key=f"process_{category}", value=category_map)
-
-        for idx, ds_list in enumerate(cluster_ds, start=1):
-            batch_value = " ".join(ds_list)
-            ti.xcom_push(key=f"process_{category}_batch{idx}", value=batch_value)
-        logging.info(
-            "[partition] Category=%s assigned_datasets=%d total_size=%s cluster_sizes=%s remaining_after=%d",
-            category,
-            len(category_map),
-            sum(category_map.values()),
-            cluster_sizes,
-            len(remaining),
-        )
-
-        # If we filled zero datasets (all empty) ensure empty strings pushed (already done above)
-        # Continue loop to next category with any remaining datasets.
 
 
 def check_proceed(**kwargs):
