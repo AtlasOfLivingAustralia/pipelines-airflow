@@ -526,17 +526,16 @@ def setup_cluster(dag_id, dataset_ids, cluster_type: ClusterType, inst_type, **k
     else:
         display_drs = ",".join(dataset_list)
 
-    instance_type = inst_type
-    if instance_type == "None":
-        rec_count_list = [get_dr_count(dr) for dr in dataset_list]
-        max_dr_count = max(rec_count_list)
-        instance_type = ala_config.EC2_SMALL_INSTANCE_TYPE
-        if max_dr_count > ala_config.DR_REC_COUNT_THRESHOLD:
-            instance_type = ala_config.EC2_XLARGE_INSTANCE_TYPE
-        log.info("Number of records in dr is dr_count=%s", max_dr_count)
-    log.info("instanceType is set to %s", instance_type)
-
     if cluster_type == ClusterType.PREINGESTION:
+        instance_type = inst_type
+        if instance_type == "None":
+            rec_count_list = [get_dr_count(dr) for dr in dataset_list]
+            max_dr_count = max(rec_count_list)
+            instance_type = ala_config.EC2_SMALL_INSTANCE_TYPE
+            if max_dr_count > ala_config.DR_REC_COUNT_THRESHOLD:
+                instance_type = ala_config.EC2_XLARGE_INSTANCE_TYPE
+            log.info("Number of records in dr is dr_count=%s", max_dr_count)
+        log.info("instanceType is set to %s", instance_type)
         emr_config = get_pre_ingestion_cluster(
             dag_id, instance_type=instance_type, name=f"Preingest {display_drs}", drs=dataset_ids
         )
