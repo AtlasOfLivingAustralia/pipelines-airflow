@@ -20,13 +20,7 @@ from datetime import date, timedelta, datetime
 import logging
 
 from ala import ala_config, ala_helper, cluster_setup
-from ala.ala_helper import (
-    step_bash_cmd,
-    s3_cp,
-    emr_python_step,
-    get_default_args,
-    get_assertion_records_count,
-)
+from ala.ala_helper import step_bash_cmd, s3_cp, emr_python_step, get_default_args, get_assertion_records_count
 
 DAG_ID = "Full_index_to_solr"
 
@@ -45,7 +39,7 @@ def get_spark_steps(
             f"/tmp/create_solr_collection_cli.py -c {ala_config.SOLR_CONFIGSET} -s {ala_config.SOLR_URL} -a add_initial_replicas {solr_collection_name}",
         ),
         s3_cp(
-            "c. Copy Sampling and IndexRecord to S3",
+            "c. Copy Sampling and IndexRecord from S3",
             f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets",
             "hdfs:///pipelines-all-datasets",
         ),
@@ -139,9 +133,7 @@ with DAG(
         return name
 
     generate_collection_name = PythonOperator(
-        task_id="generate_collection_name",
-        python_callable=_generate_collection_name,
-        provide_context=True,
+        task_id="generate_collection_name", python_callable=_generate_collection_name, provide_context=True
     )
 
     def check_image_sync_flag(**kwargs):
