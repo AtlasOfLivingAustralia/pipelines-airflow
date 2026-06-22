@@ -1,5 +1,4 @@
 import os
-import urllib
 from urllib.error import URLError
 
 import boto3
@@ -9,7 +8,6 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.dates import days_ago
 from datetime import timedelta
-from urllib.request import Request, urlopen
 import json
 from distutils.util import strtobool
 from airflow.utils.trigger_rule import TriggerRule
@@ -21,6 +19,7 @@ from ala.ala_helper import (
     get_success_notification_operator,
     get_metadata_as_json,
     download_file_with_retry,
+    get_datasets_sizing,
 )
 
 load_images = "{{ dag_run.conf['load_images'] }}"
@@ -86,7 +85,6 @@ with DAG(
         if url_to_download.startswith("http"):
             try:
                 download_file_with_retry(url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip")
-                #urllib.request.urlretrieve(url_to_download.replace(" ", "%20"), f"/tmp/{dataset_uid}.zip")
                 upload_file(
                     f"/tmp/{dataset_uid}.zip",
                     ala_config.S3_BUCKET_DWCA,
@@ -115,13 +113,11 @@ with DAG(
             for archive_file in archive_files:
                 datasets[dataset] = archive_file.size
                 print(f"{dataset} = {archive_file.size}")
-        datasets = dict(sorted(datasets.items(), key=lambda item: item[1], reverse=True))
-        return datasets
+        return get_datasets_sizing(datasets, True)
 
     def list_small_datasets(**kwargs):
         ti = kwargs["ti"]
-        datasets = ti.xcom_pull(task_ids="get_dataset_list")
-        small_datasets = dict((k, v) for k, v in datasets.items() if v <= 5000000)
+        small_datasets, _, _ = ti.xcom_pull(task_ids="get_dataset_list")
         kwargs["ti"].xcom_push(key="process_small", value=small_datasets)
         dataset_list = " ".join(small_datasets.keys())
         print("Small datasets to process " + dataset_list)
@@ -131,8 +127,7 @@ with DAG(
 
     def list_large_datasets(**kwargs):
         ti = kwargs["ti"]
-        datasets = ti.xcom_pull(task_ids="get_dataset_list")
-        large_datasets = dict((k, v) for k, v in datasets.items() if (5000000 < v < 5000000000))
+        _, large_datasets, _ = ti.xcom_pull(task_ids="get_dataset_list")
         kwargs["ti"].xcom_push(key="process_large", value=large_datasets)
         dataset_list = " ".join(large_datasets.keys()).strip()
         print("Large datasets to process " + dataset_list)
@@ -142,8 +137,7 @@ with DAG(
 
     def list_xlarge_datasets(**kwargs):
         ti = kwargs["ti"]
-        datasets = ti.xcom_pull(task_ids="get_dataset_list")
-        xlarge_datasets = dict((k, v) for k, v in datasets.items() if (v > 5000000000))
+        _, _, xlarge_datasets = ti.xcom_pull(task_ids="get_dataset_list")
         kwargs["ti"].xcom_push(key="process_xlarge", value=xlarge_datasets)
         dataset_list = " ".join(xlarge_datasets.keys())
         print("Xlarge datasets to process " + dataset_list)

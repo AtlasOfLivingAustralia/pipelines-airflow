@@ -25,14 +25,10 @@ from airflow.decorators import task
 
 from ala import ala_helper, ala_config
 from ala.ala_helper import strtobool
-from collections import OrderedDict
 
 excluded_datasets = ala_config.EXCLUDED_DATASETS
 
 DAG_ID = "Ingest_all_datasets"
-
-MAX_SMALL_INGEST_DATASET_SIZE = 5000000  # Maximum size for dataset to be considered as small ingest (dwca size)
-MIN_XLARGE_INGEST_DATASET_SIZE = 1000000000  # Minimum size for dataset to be considered as xlarge ingest (dwca size)
 
 # Thresholds control cumulative total size per category (ascending order of capacity)
 SMALL_TOTAL_THRESHOLD = (
@@ -178,24 +174,7 @@ def partition_datasets_callable(**kwargs):
     if not datasets:
         raise AirflowSkipException("No datasets discovered")
 
-    small_drs = OrderedDict(
-        sorted((item for item in datasets.items() if item[1] < MAX_SMALL_INGEST_DATASET_SIZE), key=lambda x: x[1])
-    )
-
-    large_drs = OrderedDict(
-        sorted(
-            (
-                item
-                for item in datasets.items()
-                if MAX_SMALL_INGEST_DATASET_SIZE < item[1] < MIN_XLARGE_INGEST_DATASET_SIZE
-            ),
-            key=lambda x: x[1],
-        )
-    )
-
-    xlarge_drs = OrderedDict(
-        sorted((item for item in datasets.items() if item[1] >= MIN_XLARGE_INGEST_DATASET_SIZE), key=lambda x: x[1])
-    )
+    small_drs, large_drs, xlarge_drs = ala_helper.get_datasets_sizing(datasets)
 
     category_specs = [
         ("small", SMALL_INGEST_TASKS, SMALL_TOTAL_THRESHOLD, small_drs),

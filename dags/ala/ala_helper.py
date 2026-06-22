@@ -15,6 +15,7 @@ from airflow.providers.slack.notifications.slack import send_slack_notification
 from airflow.providers.slack.operators.slack import SlackAPIPostOperator
 from ala import ala_config
 from ala import jwt_auth
+from collections import OrderedDict
 
 
 log: logging.log = logging.getLogger("airflow")
@@ -698,6 +699,45 @@ def list_drs_ingested_since(**kwargs):
     )
 
 
+def get_datasets_sizing(datasets: dict, sort_desc: bool = False):
+    """
+    Get datasets sizing for small, large, and xlarge ingestion.
+    :param datasets: dictionary of datasets and corresponding size.
+    :param sort_desc: Sort in ascending or descending order.
+    :return: small, large, and xlarge ingestion datasets with the sizes
+    """
+    # datasets = dict(sorted(datasets.items(), key=lambda item: item[1], reverse=True))
+    small_drs = OrderedDict(
+        sorted(
+            (item for item in datasets.items() if item[1] <= ala_config.MAX_SMALL_INGEST_DATASET_SIZE),
+            key=lambda x: x[1],
+            reverse=sort_desc,
+        )
+    )
+
+    large_drs = OrderedDict(
+        sorted(
+            (
+                item
+                for item in datasets.items()
+                if ala_config.MAX_SMALL_INGEST_DATASET_SIZE < item[1] < ala_config.MIN_XLARGE_INGEST_DATASET_SIZE
+            ),
+            key=lambda x: x[1],
+            reverse=sort_desc,
+        )
+    )
+
+    xlarge_drs = OrderedDict(
+        sorted(
+            (item for item in datasets.items() if item[1] >= ala_config.MIN_XLARGE_INGEST_DATASET_SIZE),
+            key=lambda x: x[1],
+            reverse=sort_desc,
+        )
+    )
+
+    return small_drs, large_drs, xlarge_drs
+
+
 def step_s3_cp_file(dr, source_path, target_path):
     """
     Copies a file from a source path to a target path in AWS S3 using the AWS CLI.
@@ -986,29 +1026,35 @@ def get_auth_header(use_jwt):
         return {"Authorization": f"{ala_config.ALA_API_KEY}"}
 
 
-def get_metadata_as_json(uid):
+def get_metadata_as_json(resource):
     """
-    Fetches metadata for a dataset from the registry (Collectory) using the API key.
+    Fetches metadata for a dataset from the registry (Collectory) using the API key or JWT Auth.
 
     Args:
-        uid (str): The unique identifier of the dataset.
+        resource (str): The resource that needs to be retrieved. This could be the UID for dataResource or dataProvider
+                        or the dataResource or dataProvider
 
     Returns:
         dict: The metadata of the dataset, or an error message if not found.
     """
 
-    if uid.startswith("dr"):
-        resource_path = f"dataResource/{uid}"
-    elif uid.startswith("dp"):
-        resource_path = f"dataProvider/{uid}"
+    if resource.startswith("dr"):
+        resource_path = f"dataResource/{resource}"
+    elif resource.startswith("dp"):
+        resource_path = f"dataProvider/{resource}"
     else:
-        raise ValueError("Not a valid dataset or data provider uid: %s", uid)
+        if resource == "dataResource" or resource == "dataProvider":
+            resource_path = resource
+        else:
+            raise ValueError("Not a valid resource: %s", resource)
 
     try:
-        jresponse = json_parse(ala_config.COLLECTORY_SERVER, resource_path, headers=get_auth_header(ala_config.USE_JWT))
+        jresponse = json_parse(
+            ala_config.COLLECTORY_SERVER, resource_path, headers=get_auth_header(ala_config.REGISTRY_USE_JWT)
+        )
         return jresponse
     except Exception as e:
-        print(f"Error fetching metadata for {uid}: {str(e)}")
+        print(f"Error fetching metadata for {resource}: {str(e)}")
         return {"error": str(e)}
 
 
