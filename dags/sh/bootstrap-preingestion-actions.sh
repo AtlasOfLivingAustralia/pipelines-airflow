@@ -8,6 +8,8 @@ export S3_BUCKET=$1
 echo "S3 bucket to use: $S3_BUCKET"
 
 # create directories
+sudo mkdir /mnt/data
+sudo ln -s /mnt/data /data
 sudo mkdir -p /data/dmgt/preingestion
 
 sudo aws s3 cp s3://$S3_BUCKET/preingestion/  /data/dmgt/preingestion  --recursive --include "*"
