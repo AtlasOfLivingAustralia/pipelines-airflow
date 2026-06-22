@@ -14,7 +14,7 @@ from datetime import timedelta
 import logging
 
 from airflow import DAG
-from airflow.exceptions import AirflowSkipException
+from airflow.exceptions import AirflowSkipException, AirflowException
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.models.baseoperator import chain
@@ -63,23 +63,30 @@ def check_args(**kwargs):
 
 
 def list_datasets_in_bucket_callable(**kwargs):
-    dwca_drs = ala_helper.list_drs_dwca_in_bucket(**kwargs)
-    if strtobool(kwargs["dag_run"].conf["skip_dwca_to_verbatim"]):
-        # Some datasets do not have verbatims. The avros might have been deleted but the dwcas were retained.
-        return ala_helper.filter_drs_with_verbatim(dwca_drs, **kwargs)
+    # Check against collectory to make sure the drs are valid
+    collectory_drs = ala_helper.get_metadata_as_json("dataResource")
+    valid_drs = [dr["uid"] for dr in collectory_drs if "uid" in dr]
+    if valid_drs:
+        dwca_drs_in_bucket = ala_helper.list_drs_dwca_in_bucket(**kwargs)
+        dwca_drs = {dr: size for dr, size in dwca_drs_in_bucket.items() if dr in valid_drs}
+        logging.info(
+            "datasets in s3 bucket %s but missing metadata in collectory %s: %s",
+            kwargs["bucket"],
+            ala_config.COLLECTORY_SERVER,
+            set(dwca_drs_in_bucket.keys()) - set(valid_drs),
+        )
 
-    return dwca_drs
+        if strtobool(kwargs["dag_run"].conf["skip_dwca_to_verbatim"]):
+            # Remove drs that do not have verbatims
+            return ala_helper.filter_drs_with_verbatim(dwca_drs, **kwargs)
+
+        return dwca_drs
+    else:
+        raise AirflowException(f"No valid drs can be retrieved from collectory {ala_config.COLLECTORY_SERVER}")
 
 
 def add_datasets_to_partition(datasets, category, cluster_count, threshold, ti):
     remaining = datasets.copy()
-    # remaining = sorted(datasets.items(), key=lambda kv: (kv[1], kv[0]))  # ascending by size then id
-    # logging.info(
-    #    "[partition] Starting with %d datasets (min_size=%s, max_size=%s)",
-    #    len(remaining),
-    #    remaining[0][1] if remaining else None,
-    #    remaining[-1][1] if remaining else None,
-    # )
 
     # for category, cluster_count, threshold in category_specs:
     logging.info(
