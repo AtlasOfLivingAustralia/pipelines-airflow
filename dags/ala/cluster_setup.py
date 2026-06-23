@@ -175,6 +175,7 @@ class EMRConfig:
         "ReleaseLabel",
         "Configurations",
         "BootstrapActions",
+        "SecurityConfiguration",
         "Applications",
         "VisibleToAllUsers",
         "JobFlowRole",
@@ -189,6 +190,7 @@ class EMRConfig:
     BootstrapActions: list
     Applications: list
     VisibleToAllUsers: bool = field(default=True, init=False)
+    SecurityConfiguration: str = field(default=ala_config.EMR_SECURITY_CONFIGURATION, init=False)
     JobFlowRole: str = field(default=ala_config.JOB_FLOW_ROLE, init=False)
     ServiceRole: str = field(default=ala_config.SERVICE_ROLE, init=False)
     Tags: list = field(

@@ -38,6 +38,7 @@ MAX_SMALL_INGEST_DATASET_SIZE = int(Variable.get("max_small_ingest_dataset_size"
 MIN_XLARGE_INGEST_DATASET_SIZE = int(Variable.get("min_xlarge_ingest_dataset_size"))
 EMR_RELEASE = Variable.get("emr_release")
 EMR_RELEASE_PREINGESTION = Variable.get("emr_release_preingestion")
+EMR_SECURITY_CONFIGURATION = Variable.get("emr_security_configuration")
 ENVIRONMENT_TYPE = Variable.get("environment")
 ES_ALIAS = Variable.get("es_alias")
 ES_HOSTS = Variable.get("es_hosts")
