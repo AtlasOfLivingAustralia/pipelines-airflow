@@ -75,7 +75,7 @@ with DAG(
     schedule_interval=None,
     tags=["emr", "preingestion"],
     params={
-        "datasetIds": "dr1411 dr8128",
+        "datasetIds": "dr1 dr2",
         "load_images": "false",
         "instanceType": ala_config.EC2_SMALL_INSTANCE_TYPE,
         "extra_args": "{}",
