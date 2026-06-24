@@ -601,8 +601,10 @@ def filter_drs_with_verbatim(dwca_drs, **kwargs):
     avro_folders = list_folders_in_bucket(
         s3=s3, bucket_name=kwargs["bucket_avro"], obj_prefix=obj_prefix, delimiter="/", regex=r"^dr[0-9]+$"
     )
+    # Avro folders exist but no corresponding dwca
     orphaned_avro_folders = list(set(avro_folders) - set(dwca_drs.keys()))
     files = []
+    # Check content for verbatims
     for folder in orphaned_avro_folders:
         file = process_prefix(
             s3=s3,
@@ -614,11 +616,10 @@ def filter_drs_with_verbatim(dwca_drs, **kwargs):
         )
         if len(file) > 0:
             files.append(file)
-            # These files may not be ingested as their dwca does not exist
-            print(files)
+    logging.info(f"These verbatims are not be ingested as their dwca does not exist:{files}")
 
     datasets_without_verbatims = list(set(dwca_drs.keys()) - set(avro_folders))
-    print(f"These datasets are without verbatims: {datasets_without_verbatims}")
+    logging.info(f"These datasets are without verbatims: {datasets_without_verbatims}")
     filtered_drs = {k: v for k, v in dwca_drs.items() if k not in datasets_without_verbatims}
     return filtered_drs
 
@@ -1024,6 +1025,22 @@ def get_auth_header(use_jwt):
         return {"Authorization": f"Bearer {auth.get_token()}"}
     else:
         return {"Authorization": f"{ala_config.ALA_API_KEY}"}
+
+
+def get_valid_datasets(drs: dict):
+    try:
+        collectory_dr_list = get_metadata_as_json("dataResource")
+        valid_datasets = drs.copy()
+        valid_drs = [dr["uid"] for dr in collectory_dr_list if "uid" in dr]
+        datasets_diff = set(drs.keys()) - set(valid_drs)
+        # verify that the datasets are truly missing. Collectory ws dataResource may not return full list
+        for dr in datasets_diff:
+            metadata = get_metadata_as_json(dr)
+            if not metadata.get("uid"):
+                valid_datasets.pop(dr)
+        return valid_datasets
+    except Exception as e:
+        raise e
 
 
 def get_metadata_as_json(resource):

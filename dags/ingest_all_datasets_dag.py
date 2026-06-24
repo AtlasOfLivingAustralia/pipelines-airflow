@@ -59,12 +59,9 @@ def check_args(**kwargs):
 
 
 def list_datasets_in_bucket_callable(**kwargs):
-    # Check against collectory to make sure the drs are valid
-    collectory_drs = ala_helper.get_metadata_as_json("dataResource")
-    valid_drs = [dr["uid"] for dr in collectory_drs if "uid" in dr]
-    if valid_drs:
+    try:
         dwca_drs_in_bucket = ala_helper.list_drs_dwca_in_bucket(**kwargs)
-        dwca_drs = {dr: size for dr, size in dwca_drs_in_bucket.items() if dr in valid_drs}
+        valid_drs = ala_helper.get_valid_datasets(dwca_drs_in_bucket)
         logging.info(
             "datasets in s3 bucket %s but missing metadata in collectory %s: %s",
             kwargs["bucket"],
@@ -74,11 +71,11 @@ def list_datasets_in_bucket_callable(**kwargs):
 
         if strtobool(kwargs["dag_run"].conf["skip_dwca_to_verbatim"]):
             # Remove drs that do not have verbatims
-            return ala_helper.filter_drs_with_verbatim(dwca_drs, **kwargs)
+            return ala_helper.filter_drs_with_verbatim(valid_drs, **kwargs)
 
-        return dwca_drs
-    else:
-        raise AirflowException(f"No valid drs can be retrieved from collectory {ala_config.COLLECTORY_SERVER}")
+        return valid_drs
+    except Exception as e:
+        raise AirflowException("An error occurred when trying to list datasets in bucket %s: %s", kwargs["bucket"], e)
 
 
 def add_datasets_to_partition(datasets, category, cluster_count, threshold, ti):
