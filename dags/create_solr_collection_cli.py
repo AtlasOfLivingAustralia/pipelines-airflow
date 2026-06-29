@@ -44,7 +44,7 @@ def add_additional_replicas(collection, solr_url, rf=1):
         for j in range(1, rf):
             node_idx = (i + j - 1) % len(nodes)
             url = f"{solr_url}/admin/collections?action=ADDREPLICA&collection={collection}&shard=shard{i}&" \
-                  f"node={nodes[node_idx]}&preferredLeader=false&type=PULL"
+                  f"node={nodes[node_idx]}&preferredLeader=false"
             fetch_data(url)
             print(f'Solr replica is added successfully using URL:{url}')
 
