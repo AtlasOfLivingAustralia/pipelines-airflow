@@ -3,10 +3,10 @@ import json
 import logging
 import os
 import re
+import time
 import zipfile
 from datetime import date, datetime, timedelta
 from enum import StrEnum
-from urllib.parse import urlparse
 
 import boto3
 import requests
@@ -14,9 +14,14 @@ from airflow.operators.empty import EmptyOperator
 from airflow.providers.slack.notifications.slack import send_slack_notification
 from airflow.providers.slack.operators.slack import SlackAPIPostOperator
 from ala import ala_config
+from ala import jwt_auth
+from collections import OrderedDict
+
 
 log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
+
+ALLOWED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"}
 
 
 def strtobool(val: str) -> bool:
@@ -24,29 +29,182 @@ def strtobool(val: str) -> bool:
     return str(val).strip().lower() in {"y", "yes", "t", "true", "on", "1"}
 
 
+def http_request_with_retry(
+    method: str,
+    url: str,
+    max_retries: int = 3,
+    timeout: int = 60,
+    backoff_factor: float = 2.0,
+    retry_on_status: tuple = (500, 502, 503, 504, 429),
+    headers: dict = None,
+    **kwargs,
+) -> requests.Response:
+    """
+    Makes an HTTP request with exponential backoff retry logic.
+
+    Args:
+        method (str): HTTP method to use (GET, POST, PUT, DELETE, PATCH, HEAD).
+        url (str): The URL to send the request to.
+        max_retries (int, optional): Maximum number of retry attempts. Defaults to 3.
+        timeout (int, optional): Request timeout in seconds. Defaults to 60.
+        backoff_factor (float, optional): Multiplier for exponential backoff. Defaults to 2.0.
+        retry_on_status (tuple, optional): HTTP status codes that should trigger a retry. Defaults to (500, 502, 503, 504, 429).
+        headers (dict, optional): Optional HTTP headers to include in the request.
+        **kwargs: Additional arguments to pass to requests method (params, json, data, files, etc.).
+
+    Returns:
+        requests.Response: The response object resulting from the HTTP request.
+
+    Raises:
+        IOError: If all retry attempts fail or a non-retryable HTTP error occurs.
+        requests.exceptions.RequestException: For connection errors or other request-related issues.
+
+    Example:
+        # GET request
+        response = http_request_with_retry("GET", "https://api.example.com/data", headers={"Authorization": "Bearer token"})
+
+        # POST request
+        response = http_request_with_retry("POST", "https://api.example.com/submit", json={"key": "value"})
+
+        # With custom retry settings
+        response = http_request_with_retry("GET", url, max_retries=5, backoff_factor=1.5, timeout=120)
+    """
+    method = method.upper()
+    if method not in ALLOWED_METHODS:
+        raise ValueError(f"Invalid HTTP method: {method}. Must be one of {ALLOWED_METHODS}")
+
+    last_exception = None
+    for attempt in range(max_retries + 1):
+        try:
+            log.info(f"HTTP {method} request to {url} (attempt {attempt + 1}/{max_retries + 1})")
+
+            # Make the request using the appropriate method
+            response = requests.request(method=method, url=url, headers=headers, timeout=timeout, **kwargs)
+
+            # Check if we should retry based on status code
+            if response.status_code in retry_on_status:
+                if attempt < max_retries:
+                    wait_time = backoff_factor**attempt
+                    log.warning(
+                        f"HTTP {response.status_code} error for {url}. Retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries + 1})"
+                    )
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    log.error(f"Max retries ({max_retries}) reached for {url} with status {response.status_code}")
+                    response.raise_for_status()
+
+            # If we get here, the request was successful (or failed with a non-retryable status)
+            response.raise_for_status()
+            log.info(f"HTTP {method} request to {url} succeeded with status {response.status_code}")
+            return response
+
+        except requests.exceptions.Timeout as err:
+            last_exception = err
+            if attempt < max_retries:
+                wait_time = backoff_factor**attempt
+                log.warning(
+                    f"Timeout for {url}. Retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries + 1})"
+                )
+                time.sleep(wait_time)
+            else:
+                log.error(f"Max retries ({max_retries}) reached for {url} due to timeout", exc_info=err)
+                raise IOError(f"Request to {url} timed out after {max_retries} retries") from err
+
+        except requests.exceptions.ConnectionError as err:
+            last_exception = err
+            if attempt < max_retries:
+                wait_time = backoff_factor**attempt
+                log.warning(
+                    f"Connection error for {url}. Retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries + 1})"
+                )
+                time.sleep(wait_time)
+            else:
+                log.error(f"Max retries ({max_retries}) reached for {url} due to connection error", exc_info=err)
+                raise IOError(f"Connection to {url} failed after {max_retries} retries") from err
+
+        except requests.exceptions.HTTPError as err:
+            last_exception = err
+            # Only retry on specific status codes
+            if err.response is not None and err.response.status_code not in retry_on_status:
+                log.error(f"Non-retryable HTTP error {err.response.status_code} for {url}", exc_info=err)
+                raise IOError(f"HTTP error {err.response.status_code} for {url}") from err
+            # If it's a retryable status code, we'll handle it in the next iteration
+            if attempt >= max_retries:
+                log.error(f"Max retries ({max_retries}) reached for {url}", exc_info=err)
+                raise IOError(f"Request to {url} failed after {max_retries} retries") from err
+
+        except requests.exceptions.RequestException as err:
+            last_exception = err
+            log.error(f"Request exception for {url}", exc_info=err)
+            raise IOError(f"Request to {url} failed: {str(err)}") from err
+
+    # This should never be reached, but just in case
+    if last_exception:
+        raise IOError(f"Request to {url} failed after {max_retries} retries") from last_exception
+    raise IOError(f"Request to {url} failed unexpectedly")
+
+
+def download_file_with_retry(url: str, local_path: str, max_retries: int = 3, timeout: int = 300) -> str:
+    """
+    Downloads a file from a URL to a local path with retry logic.
+
+    Args:
+        url (str): The URL to download the file from.
+        local_path (str): The local filesystem path where the file should be saved.
+        max_retries (int, optional): Maximum number of retry attempts. Defaults to 3.
+        timeout (int, optional): Request timeout in seconds. Defaults to 300 (5 minutes).
+
+    Returns:
+        str: The local path where the file was saved.
+
+    Raises:
+        IOError: If the download fails after all retry attempts.
+
+    Example:
+        local_file = download_file_with_retry("https://example.com/data.zip", "/tmp/data.zip")
+    """
+    try:
+        log.info(f"Downloading file from {url} to {local_path}")
+        response = http_request_with_retry("GET", url, max_retries=max_retries, timeout=timeout, stream=True)
+
+        # Save the file in chunks
+        with open(local_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+        log.info(f"Successfully downloaded file to {local_path}")
+        return local_path
+    except Exception as err:
+        log.error(f"Failed to download file from {url} to {local_path}", exc_info=err)
+        raise IOError(f"Failed to download file from {url}") from err
+
+
 def call_url(url, headers=None, timeout=60) -> requests.Response:
     """
     Sends a GET request to the specified URL with optional headers and returns the response.
+    Uses retry logic with exponential backoff for transient failures.
 
     Args:
         url (str): The URL to send the GET request to.
         headers (dict, optional): Optional HTTP headers to include in the request.
+        timeout (int, optional): Request timeout in seconds. Defaults to 60.
 
     Returns:
         requests.Response: The response object resulting from the GET request.
 
     Raises:
-        IOError: If an HTTP error occurs during the request.
+        IOError: If an HTTP error occurs during the request after all retries.
     """
     try:
         print(f"Calling URL: {url}")
-        with requests.get(url, headers=headers, timeout=timeout) as response:
-            response.raise_for_status()
-            print(f"Response: {response}")
-            return response
-    except requests.exceptions.HTTPError as err:
+        response = http_request_with_retry("GET", url, headers=headers, timeout=timeout)
+        print(f"Response: {response}")
+        return response
+    except IOError as err:
         logging.error("Error encountered during request %s", url, exc_info=err)
-        raise IOError(err) from err
+        raise
 
 
 def join_url(*url_fragments: str) -> str:
@@ -62,26 +220,35 @@ def join_url(*url_fragments: str) -> str:
 def json_parse(base_url: str, url_path: str, params=None, headers=None, method="GET"):
     """
     Calls the specified URL and returns the JSON response.
-    :param base_url: like https://collections.ala.org.au/ws
-    :param url_path: like /dataResource/dr000
-    :param params: is a dictionary of parameters to be passed to the API
-    :return: is the json response from the URL
-    """
+    Uses retry logic with exponential backoff for transient failures.
 
+    Args:
+        base_url (str): Base URL like https://collections.ala.org.au/ws
+        url_path (str): URL path like /dataResource/dr000
+        params (dict, optional): Dictionary of parameters to be passed to the API
+        headers (dict, optional): Optional HTTP headers to include in the request
+        method (str, optional): HTTP method to use (GET or POST). Defaults to GET.
+
+    Returns:
+        dict or bytes: JSON response from the URL (dict for GET, bytes for POST)
+
+    Raises:
+        IOError: If an HTTP error occurs during the request after all retries.
+    """
     try:
         full_url = join_url(base_url, url_path)
         if method == "GET":
-            with requests.get(full_url, params, headers=headers, timeout=60) as response:
-                response.raise_for_status()
-                json_result = json.loads(response.content)
-                return json_result
+            response = http_request_with_retry("GET", full_url, params=params, headers=headers, timeout=60)
+            json_result = json.loads(response.content)
+            return json_result
         elif method == "POST":
-            with requests.post(full_url, json=params, headers=headers, timeout=60) as response:
-                response.raise_for_status()
-                return response.content
-    except requests.exceptions.HTTPError as err:
+            response = http_request_with_retry("POST", full_url, json=params, headers=headers, timeout=60)
+            return response.content
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}. Use GET or POST.")
+    except IOError as err:
         logging.error("Error encountered during request %s with params %s", full_url, params, exc_info=err)
-        raise IOError(err)
+        raise
 
 
 def get_dr_count(dr: str):
@@ -318,6 +485,54 @@ def step_cmd_args(step_name, cmd_arr, action_on_failure="TERMINATE_CLUSTER"):
     }
 
 
+def list_folders_in_bucket(s3, bucket_name, obj_prefix, delimiter, regex):
+    # session = boto3.Session()
+    # s3 = session.client("s3")
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter)
+    folders = []
+    while True:
+        folders += [o.get("Prefix").split("/")[-2] for o in response.get("CommonPrefixes")]
+
+        # Check if there are more results to retrieve
+        if response.get("NextContinuationToken"):
+            # Make another request with the continuation token
+            response = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=obj_prefix,
+                Delimiter=delimiter,
+                ContinuationToken=response.get("NextContinuationToken"),
+            )
+        else:
+            break
+
+    dr_pattern = re.compile(regex)
+    drs = [dr for dr in list(filter(dr_pattern.match, folders)) if dr not in ala_config.EXCLUDED_DATASETS]
+    return drs
+
+
+def process_prefix(s3, bucket_name, l_prefix, l_dr, obj_key_regex, time_range):
+    # session = boto3.Session()
+    # s3 = session.client("s3")
+    results = {}
+    paginator = s3.get_paginator("list_objects_v2")
+    page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=l_prefix)
+
+    for page in page_iterator:
+        for my_bucket_object in page.get("Contents", []):
+            matches = list(re.findall(obj_key_regex, my_bucket_object["Key"]))
+            if matches:
+                lower_range = True
+                higher_range = True
+                if time_range[0]:
+                    lower_range = my_bucket_object["LastModified"].isoformat() >= time_range[0]
+                if time_range[1]:
+                    higher_range = my_bucket_object["LastModified"].isoformat() <= time_range[1]
+                if lower_range and higher_range:
+                    results[l_dr] = my_bucket_object["Size"]
+
+    return results
+
+
 def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder="", time_range=(None, None)):
     """
     Lists and aggregates the sizes of objects in an S3 bucket that match a given key regex,
@@ -335,59 +550,17 @@ def list_objects_in_bucket(bucket_name, obj_prefix, obj_key_regex, sub_dr_folder
         dict: A dictionary where keys are dataset folder names (e.g., "dr123") and values are the
             total size (in bytes) of matching objects within each folder, sorted in descending order by size.
     """
-
-    def list_folders_in_bucket(bucket_name, obj_prefix, delimiter, regex):
-        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=obj_prefix, Delimiter=delimiter)
-        folders = []
-        while True:
-            folders += [o.get("Prefix").split("/")[-2] for o in response.get("CommonPrefixes")]
-
-            # Check if there are more results to retrieve
-            if response.get("NextContinuationToken"):
-                # Make another request with the continuation token
-                response = s3.list_objects_v2(
-                    Bucket=bucket_name,
-                    Prefix=obj_prefix,
-                    Delimiter=delimiter,
-                    ContinuationToken=response.get("NextContinuationToken"),
-                )
-            else:
-                break
-
-        dr_pattern = re.compile(regex)
-        drs = [dr for dr in list(filter(dr_pattern.match, folders)) if dr not in ala_config.EXCLUDED_DATASETS]
-        return drs
-
-    def process_prefix(l_prefix, l_dr):
-        results = {}
-        paginator = s3.get_paginator("list_objects_v2")
-        page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=l_prefix)
-
-        for page in page_iterator:
-            for my_bucket_object in page.get("Contents", []):
-                matches = list(re.findall(obj_key_regex, my_bucket_object["Key"]))
-                if matches:
-                    lower_range = True
-                    higher_range = True
-                    if time_range[0]:
-                        lower_range = my_bucket_object["LastModified"].isoformat() >= time_range[0]
-                    if time_range[1]:
-                        higher_range = my_bucket_object["LastModified"].isoformat() <= time_range[1]
-                    if lower_range and higher_range:
-                        results[l_dr] = my_bucket_object["Size"]
-
-        return results
+    session = boto3.Session()
+    s3 = session.client("s3")
 
     log.info("Reading from bucket: %s", bucket_name)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        session = boto3.Session()
-        s3 = session.client("s3")
-        drs = list_folders_in_bucket(bucket_name, obj_prefix, delimiter="/", regex=r"^dr[0-9]+$")
+        drs = list_folders_in_bucket(s3, bucket_name, obj_prefix, delimiter="/", regex=r"^dr[0-9]+$")
         futures = []
         for dr in drs:
             prefix = f"{obj_prefix}{dr}/{sub_dr_folder}"
-            futures.append(executor.submit(process_prefix, prefix, dr))
+            futures.append(executor.submit(process_prefix, s3, bucket_name, prefix, dr, obj_prefix, time_range))
         datasets = {}
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
@@ -419,6 +592,36 @@ def list_drs_dwca_in_bucket(**kwargs):
         that match the pattern 'dr[0-9]+.zip'.
     """
     return list_objects_in_bucket(kwargs["bucket"], "dwca-imports/", r"^.*/(dr[0-9]+)\.zip$", sub_dr_folder="")
+
+
+def filter_drs_with_verbatim(dwca_drs, **kwargs):
+    session = boto3.Session()
+    s3 = session.client("s3")
+    obj_prefix = "pipelines-data/"
+    avro_folders = list_folders_in_bucket(
+        s3=s3, bucket_name=kwargs["bucket_avro"], obj_prefix=obj_prefix, delimiter="/", regex=r"^dr[0-9]+$"
+    )
+    # Avro folders exist but no corresponding dwca
+    orphaned_avro_folders = list(set(avro_folders) - set(dwca_drs.keys()))
+    files = []
+    # Check content for verbatims
+    for folder in orphaned_avro_folders:
+        file = process_prefix(
+            s3=s3,
+            bucket_name=kwargs["bucket_avro"],
+            l_prefix=f"{obj_prefix}{folder}/1/verbatim/",
+            l_dr=folder,
+            obj_key_regex=r"^.*/verbatim+[\-0-9of]*\.avro$",
+            time_range=(None, None) if "time_range" not in kwargs else kwargs["time_range"],
+        )
+        if len(file) > 0:
+            files.append(file)
+    logging.info(f"These verbatims are not be ingested as their dwca does not exist:{files}")
+
+    datasets_without_verbatims = list(set(dwca_drs.keys()) - set(avro_folders))
+    logging.info(f"These datasets are without verbatims: {datasets_without_verbatims}")
+    filtered_drs = {k: v for k, v in dwca_drs.items() if k not in datasets_without_verbatims}
+    return filtered_drs
 
 
 def list_drs_index_avro_in_bucket(**kwargs):
@@ -464,7 +667,7 @@ def list_drs_verbatim_avro_in_bucket(**kwargs):
     """
 
     return list_objects_in_bucket(
-        kwargs["bucket"],
+        kwargs["bucket_avro"],
         "pipelines-data/",
         r"^.*/dr[0-9]+/1/verbatim/verbatim+[\-0-9of]*\.avro$",
         sub_dr_folder="",
@@ -495,6 +698,45 @@ def list_drs_ingested_since(**kwargs):
         sub_dr_folder="1/interpretation-metrics.yml",
         time_range=kwargs["time_range"],
     )
+
+
+def get_datasets_sizing(datasets: dict, sort_desc: bool = False):
+    """
+    Get datasets sizing for small, large, and xlarge ingestion.
+    :param datasets: dictionary of datasets and corresponding size.
+    :param sort_desc: Sort in ascending or descending order.
+    :return: small, large, and xlarge ingestion datasets with the sizes
+    """
+    # datasets = dict(sorted(datasets.items(), key=lambda item: item[1], reverse=True))
+    small_drs = OrderedDict(
+        sorted(
+            (item for item in datasets.items() if item[1] <= ala_config.MAX_SMALL_INGEST_DATASET_SIZE),
+            key=lambda x: x[1],
+            reverse=sort_desc,
+        )
+    )
+
+    large_drs = OrderedDict(
+        sorted(
+            (
+                item
+                for item in datasets.items()
+                if ala_config.MAX_SMALL_INGEST_DATASET_SIZE < item[1] < ala_config.MIN_XLARGE_INGEST_DATASET_SIZE
+            ),
+            key=lambda x: x[1],
+            reverse=sort_desc,
+        )
+    )
+
+    xlarge_drs = OrderedDict(
+        sorted(
+            (item for item in datasets.items() if item[1] >= ala_config.MIN_XLARGE_INGEST_DATASET_SIZE),
+            key=lambda x: x[1],
+            reverse=sort_desc,
+        )
+    )
+
+    return small_drs, large_drs, xlarge_drs
 
 
 def step_s3_cp_file(dr, source_path, target_path):
@@ -775,42 +1017,70 @@ def get_assertion_records_count():
         return -1
 
 
-def get_metadata_as_json(registry_base_url, uid, ala_api_key):
+def get_auth_header(use_jwt):
+    if use_jwt:
+        auth = jwt_auth.Authenticator(
+            ala_config.AUTH_TOKEN_URL, ala_config.AUTH_CLIENT_ID, ala_config.AUTH_CLIENT_SECRET, ala_config.AUTH_SCOPE
+        )
+        return {"Authorization": f"Bearer {auth.get_token()}"}
+    else:
+        return {"Authorization": f"{ala_config.ALA_API_KEY}"}
+
+
+def get_valid_datasets(drs: dict):
+    try:
+        collectory_dr_list = get_metadata_as_json("dataResource")
+        valid_datasets = drs.copy()
+        valid_drs = [dr["uid"] for dr in collectory_dr_list if "uid" in dr]
+        datasets_diff = set(drs.keys()) - set(valid_drs)
+        # verify that the datasets are truly missing. Collectory ws dataResource may not return full list
+        for dr in datasets_diff:
+            metadata = get_metadata_as_json(dr)
+            if not metadata.get("uid"):
+                valid_datasets.pop(dr)
+        return valid_datasets
+    except Exception as e:
+        raise e
+
+
+def get_metadata_as_json(resource):
     """
-    Fetches metadata for a dataset from the registry (Collectory) using the API key.
+    Fetches metadata for a dataset from the registry (Collectory) using the API key or JWT Auth.
 
     Args:
-        dataset_uid (str): The unique identifier of the dataset.
-        registry_url (str): The URL of the registry (Collectory).
-        ala_api_key (str): The API key for authentication.
+        resource (str): The resource that needs to be retrieved. This could be the UID for dataResource or dataProvider
+                        or the dataResource or dataProvider
 
     Returns:
         dict: The metadata of the dataset, or an error message if not found.
     """
 
-    if uid.startswith("dr"):
-        resource_path = f"dataResource/{uid}"
-    elif uid.startswith("dp"):
-        resource_path = f"dataProvider/{uid}"
+    if resource.startswith("dr"):
+        resource_path = f"dataResource/{resource}"
+    elif resource.startswith("dp"):
+        resource_path = f"dataProvider/{resource}"
     else:
-        raise ValueError("Not a valid dataset or data provider uid: %s", uid)
+        if resource == "dataResource" or resource == "dataProvider":
+            resource_path = resource
+        else:
+            raise ValueError("Not a valid resource: %s", resource)
 
     try:
-        jresponse = json_parse(registry_base_url, resource_path, headers={"Authorization": ala_api_key})
+        jresponse = json_parse(
+            ala_config.COLLECTORY_SERVER, resource_path, headers=get_auth_header(ala_config.REGISTRY_USE_JWT)
+        )
         return jresponse
     except Exception as e:
-        print(f"Error fetching metadata for {uid}: {str(e)}")
+        print(f"Error fetching metadata for {resource}: {str(e)}")
         return {"error": str(e)}
 
 
-def update_registry_metadata(registry_base_url, uid, ala_api_key, metadata):
+def update_registry_metadata(uid, metadata):
     """
     Updates metadata for a dataset in the registry (Collectory) using the API key.
 
     Args:
-        registry_base_url (str): The base URL of the registry (Collectory).
         uid (str): The unique identifier of the dataset.
-        ala_api_key (str): The API key for authentication.
         metadata (dict): The metadata to update.
 
     Returns:
@@ -825,7 +1095,11 @@ def update_registry_metadata(registry_base_url, uid, ala_api_key, metadata):
 
     try:
         jresponse = json_parse(
-            registry_base_url, resource_path, headers={"Authorization": ala_api_key}, method="POST", params=metadata
+            ala_config.COLLECTORY_SERVER,
+            resource_path,
+            headers=get_auth_header(ala_config.REGISTRY_USE_JWT),
+            method="POST",
+            params=metadata,
         )
         return jresponse
     except Exception as e:

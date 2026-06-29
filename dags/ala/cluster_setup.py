@@ -6,7 +6,7 @@ from enum import Enum
 from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.operators.emr import EmrAddStepsOperator, EmrCreateJobFlowOperator
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor, EmrStepSensor
-from ala import ala_config
+from ala import ala_config, ala_helper
 from ala.ala_helper import get_dr_count, get_success_notification_operator, step_bash_cmd
 
 
@@ -175,6 +175,7 @@ class EMRConfig:
         "ReleaseLabel",
         "Configurations",
         "BootstrapActions",
+        "SecurityConfiguration",
         "Applications",
         "VisibleToAllUsers",
         "JobFlowRole",
@@ -182,12 +183,14 @@ class EMRConfig:
         "Tags",
         "LogUri",
         "Instances",
+        "Steps",
     ]
     ReleaseLabel: str
     Configurations: list
     BootstrapActions: list
     Applications: list
     VisibleToAllUsers: bool = field(default=True, init=False)
+    SecurityConfiguration: str = field(default=ala_config.EMR_SECURITY_CONFIGURATION, init=False)
     JobFlowRole: str = field(default=ala_config.JOB_FLOW_ROLE, init=False)
     ServiceRole: str = field(default=ala_config.SERVICE_ROLE, init=False)
     Tags: list = field(
@@ -198,6 +201,7 @@ class EMRConfig:
         ],
         init=False,
     )
+    Steps: list = field(default_factory=lambda: [], init=False)
 
     @property
     def Name(self) -> str:
@@ -228,14 +232,19 @@ class EMRConfig:
             {"Key": "Name", "Value": sanitize_tag(sanitize_name(self.Name))},
             {"Key": "data-resources", "Value": sanitize_tag(sanitize_name(self.data_resources))},
         ]
-        self.BootstrapActions += [
-            {
-                "Name": "CloudWatch Agent",
-                "ScriptBootstrapAction": {
-                    "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/sh/bootstrap-cloudwatch-agent.sh"
-                },
-            }
-        ]
+        emr_version_match = re.findall(r"emr-(\d+)", self.ReleaseLabel, re.IGNORECASE)
+        if len(emr_version_match) > 0:
+            emr_version = int(emr_version_match[0])
+            # TODO: Cater for cloudwatch agent for EMR 7
+            if emr_version < 6:
+                self.BootstrapActions += [
+                    {
+                        "Name": "CloudWatch Agent",
+                        "ScriptBootstrapAction": {
+                            "Path": f"s3://{ala_config.S3_BUCKET}/airflow/dags/sh/bootstrap-cloudwatch-agent.sh"
+                        },
+                    }
+                ]
 
 
 @dataclass
@@ -255,7 +264,7 @@ class PreIngestionEMRConfig(EMRConfig):
                 "Market": ala_config.MASTER_MARKET,
                 "InstanceRole": "MASTER",
                 "InstanceType": self.instance_type,
-                "CustomAmiId": ala_config.PREINGESTION_AMI,
+                # "CustomAmiId": ala_config.PREINGESTION_AMI,
                 "InstanceCount": 1,
                 "EbsConfiguration": {
                     "EbsBlockDeviceConfigs": [
@@ -519,17 +528,16 @@ def setup_cluster(dag_id, dataset_ids, cluster_type: ClusterType, inst_type, **k
     else:
         display_drs = ",".join(dataset_list)
 
-    instance_type = inst_type
-    if instance_type == "None":
-        rec_count_list = [get_dr_count(dr) for dr in dataset_list]
-        max_dr_count = max(rec_count_list)
-        instance_type = ala_config.EC2_SMALL_INSTANCE_TYPE
-        if max_dr_count > ala_config.DR_REC_COUNT_THRESHOLD:
-            instance_type = ala_config.EC2_XLARGE_INSTANCE_TYPE
-        log.info("Number of records in dr is dr_count=%s", max_dr_count)
-    log.info("instanceType is set to %s", instance_type)
-
     if cluster_type == ClusterType.PREINGESTION:
+        instance_type = inst_type
+        if instance_type == "None":
+            rec_count_list = [get_dr_count(dr) for dr in dataset_list]
+            max_dr_count = max(rec_count_list)
+            instance_type = ala_config.EC2_SMALL_INSTANCE_TYPE
+            if max_dr_count > ala_config.DR_REC_COUNT_THRESHOLD:
+                instance_type = ala_config.EC2_XLARGE_INSTANCE_TYPE
+            log.info("Number of records in dr is dr_count=%s", max_dr_count)
+        log.info("instanceType is set to %s", instance_type)
         emr_config = get_pre_ingestion_cluster(
             dag_id, instance_type=instance_type, name=f"Preingest {display_drs}", drs=dataset_ids
         )

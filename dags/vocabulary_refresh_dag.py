@@ -15,7 +15,9 @@ log.setLevel(logging.INFO)
 
 _CHUNK_SIZE = 4096
 OUT_DIR = "/tmp/"
-VOCAB_URL = "https://repository.gbif.org/repository/releases/org/gbif/vocabulary/export/LifeStage/1.0.3/LifeStage-1.0.3.zip"
+VOCAB_URL = (
+    "https://repository.gbif.org/repository/releases/org/gbif/vocabulary/export/LifeStage/1.0.3/LifeStage-1.0.3.zip"
+)
 LOCAL_ZIP_PATH = f"{OUT_DIR}/LifeStage.zip"
 S3_PATH = "pipelines-vocabularies/LifeStage.json"
 
@@ -46,11 +48,10 @@ def taskflow():
         :return: return a list of files
         """
         log.info(f"Getting this URL: {url}")
-        with requests.get(url, stream=True) as response:
-            response.raise_for_status()
-            with open(local_path, "wb") as of:
-                for chunk in response.iter_content(_CHUNK_SIZE):
-                    of.write(chunk)
+        response = ala_helper.http_request_with_retry("GET", url, stream=True)
+        with open(local_path, "wb") as of:
+            for chunk in response.iter_content(_CHUNK_SIZE):
+                of.write(chunk)
         log.info(f"Downloading {local_path} finished.")
         return local_path
 
@@ -85,10 +86,7 @@ def taskflow():
         log.info(f"Extracted file: {json_file} ")
         return json_file
 
-    (
-        upload_file(decompress(download()))
-        >> ala_helper.get_success_notification_operator()
-    )
+    (upload_file(decompress(download())) >> ala_helper.get_success_notification_operator())
 
 
 dag = taskflow()

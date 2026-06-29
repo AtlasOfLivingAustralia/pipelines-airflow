@@ -15,6 +15,7 @@ export SOLR_COLLECTION=${12}
 export SOLR_CONFIGSET=${13}
 export ES_HOSTS=${14}
 export ES_ALIAS=${15}
+export JAVA_PATH=${16}
 
 echo "S3_BUCKET $S3_BUCKET"
 echo "ALA_API_KEY $ALA_API_KEY"
@@ -31,6 +32,7 @@ echo "SOLR_COLLECTION $SOLR_COLLECTION"
 echo "SOLR_CONFIGSET $SOLR_CONFIGSET"
 echo "ES_HOSTS $ES_HOSTS"
 echo "ES_ALIAS $ES_ALIAS"
+echo "JAVA_PATH $JAVA_PATH"
 
 # add API key
 echo 'Setting API key'
@@ -58,6 +60,10 @@ sudo sed -i "s~SOLR_CONFIGSET~$SOLR_CONFIGSET~g" /data/la-pipelines/config/la-pi
 echo 'Setting elastic URL'
 sudo sed -i "s~ES_HOSTS~$ES_HOSTS~g" /data/la-pipelines/config/la-pipelines-local.yaml
 sudo sed -i "s~ES_ALIAS~$ES_ALIAS~g" /data/la-pipelines/config/la-pipelines-local.yaml
+
+# java path
+echo 'Setting JAVA PATH'
+sudo sed -i "s~JAVA_PATH~$JAVA_PATH~g" /data/la-pipelines/config/la-pipelines-local.yaml
 
 echo "$(< /data/la-pipelines/config/la-pipelines-local.yaml )"
 

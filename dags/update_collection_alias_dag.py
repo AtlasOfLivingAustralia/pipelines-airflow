@@ -24,6 +24,7 @@ checks_available = [
     "check_spatial_layer_cl1048",
     "check_spatial_layer_cl966",
     "check_spatial_layer_cl21",
+    "check_representative_fields",
 ]
 checks_available.sort()
 checks_selected = {}
@@ -120,6 +121,9 @@ with DAG(
     def check_spatial_layer_cl21(**kwargs):
         return check_function("check_spatial_layer_cl21", ucli.check_spatial_layer_cl21, **kwargs)
 
+    def check_representative_fields(**kwargs):
+        return check_function("check_representative_fields", ucli.check_representative_fields, **kwargs)
+
     def switch_collection_alias(**kwargs):
         ti = kwargs["ti"]
         params = parse_params(kwargs)
@@ -194,7 +198,7 @@ with DAG(
 
     with TaskGroup(group_id="index_checks") as index_checks_task_grp:
         for check in checks_available:
-            (PythonOperator(task_id=check, python_callable=locals()[check], provide_context=True))
+            (PythonOperator(task_id=check, python_callable=locals()[check], provide_context=True, pool="solr_queries"))
     current_asserted_records_task >> index_checks_task_grp >> switch_collection_alias_op
     switch_collection_alias_op >> remove_old_collections_op
     remove_old_collections_op >> assertion_sync_task >> clear_dashboards_task

@@ -77,7 +77,7 @@ with DAG(
 
     def delete_dataset_files(**kwargs):
         """Delete dataset files in S3 for provided datasetIds string (space separated)."""
-        datasets_param = kwargs["dag_run"].conf["datasetIds"]
+        dataset_param_list = kwargs["dag_run"].conf["datasetIds"]
         delete_avro_files = strtobool(kwargs["dag_run"].conf["delete_avro_files"])
         retain_dwca = strtobool(kwargs["dag_run"].conf["retain_dwca"])
         retain_uuid = strtobool(kwargs["dag_run"].conf["retain_uuid"])
@@ -85,39 +85,41 @@ with DAG(
         s3_client = boto3.client("s3")
         s3 = boto3.resource("s3")
 
-        if not retain_dwca:
-            _delete_prefix_objects(
-                bucket_name=ala_config.S3_BUCKET_DWCA,
-                prefix=f"dwca-imports/{datasets_param}/",
-                s3_resource=s3,
-                s3_client=s3_client,
-                description="DWCA",
-            )
+        dataset_list = dataset_param_list.split()
+        for count, dataset in enumerate(dataset_list):
+            if not retain_dwca:
+                _delete_prefix_objects(
+                    bucket_name=ala_config.S3_BUCKET_DWCA,
+                    prefix=f"dwca-imports/{dataset}/",
+                    s3_resource=s3,
+                    s3_client=s3_client,
+                    description="DWCA",
+                )
 
-        if delete_avro_files:
-            _delete_prefix_objects(
-                bucket_name=ala_config.S3_BUCKET_AVRO,
-                prefix=f"pipelines-all-datasets/index-record/{datasets_param}/",
-                s3_resource=s3,
-                s3_client=s3_client,
-                description="index-record",
-            )
-            _delete_prefix_objects(
-                bucket_name=ala_config.S3_BUCKET_AVRO,
-                prefix=f"dwca-exports/{datasets_param}.zip",
-                s3_resource=s3,
-                s3_client=s3_client,
-                description="dwca-exports-zip",
-            )
+            if delete_avro_files:
+                _delete_prefix_objects(
+                    bucket_name=ala_config.S3_BUCKET_AVRO,
+                    prefix=f"pipelines-all-datasets/index-record/{dataset}/",
+                    s3_resource=s3,
+                    s3_client=s3_client,
+                    description="index-record",
+                )
+                _delete_prefix_objects(
+                    bucket_name=ala_config.S3_BUCKET_AVRO,
+                    prefix=f"dwca-exports/{dataset}.zip",
+                    s3_resource=s3,
+                    s3_client=s3_client,
+                    description="dwca-exports-zip",
+                )
 
-            _delete_prefix_objects(
-                bucket_name=ala_config.S3_BUCKET_AVRO,
-                prefix=f"pipelines-data/{datasets_param}/",
-                s3_resource=s3,
-                s3_client=s3_client,
-                description="pipelines-data",
-                exclude_contains=["identifiers/", "identifiers-backup/"] if retain_uuid else None,
-            )
+                _delete_prefix_objects(
+                    bucket_name=ala_config.S3_BUCKET_AVRO,
+                    prefix=f"pipelines-data/{dataset}/",
+                    s3_resource=s3,
+                    s3_client=s3_client,
+                    description="pipelines-data",
+                    exclude_contains=["identifiers/", "identifiers-backup/"] if retain_uuid else None,
+                )
 
     delete_dataset_in_s3 = PythonOperator(
         task_id="delete_dataset", provide_context=True, op_kwargs={}, python_callable=delete_dataset_files

@@ -65,12 +65,12 @@ def taskflow():
 
         def check_status(sync_url):
             MAX_COUNT = 100
-            SLEEP_TIME = 30
+            SLEEP_TIME = 60
             cnt = 1
             prev_records_with_assertions_count = ala_helper.get_assertion_records_count()
             while cnt <= MAX_COUNT:
                 time.sleep(SLEEP_TIME)
-                assertions_status = requests.get(f"{sync_url}/status", headers=headers)
+                assertions_status = ala_helper.http_request_with_retry("GET", f"{sync_url}/status", headers=headers)
                 records_with_assertions_count = ala_helper.get_assertion_records_count()
                 print(
                     f"{cnt}: Sync Status API called successfully and here is status code: {assertions_status.status_code}, text: {assertions_status.text}, number of records with assertions:{records_with_assertions_count}"
@@ -103,8 +103,7 @@ def taskflow():
 
         try:
             sync_url = ala_helper.join_url(ala_config.BIOCACHE_URL, "sync")
-            r = requests.get(sync_url, headers=headers)
-            r.raise_for_status()
+            r = ala_helper.http_request_with_retry("GET", sync_url, headers=headers)
             print(f"Sync API called successfully and here is status code: {r.status_code}")
             check_status(sync_url)
 

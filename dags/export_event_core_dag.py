@@ -15,7 +15,7 @@ from airflow.utils.dates import days_ago
 
 from datetime import timedelta, timezone, datetime
 
-from ala import ala_config, cluster_setup
+from ala import ala_config, cluster_setup, ala_helper
 from ala.ala_helper import step_bash_cmd, get_default_args, get_success_notification_operator
 from ala.doi_service import S3Service
 from ala.doi_service import CollectoryService
@@ -148,8 +148,10 @@ with DAG(
 
         # We may not need to use the real resource
         token = oauth2client.client_credentials(scope="users/read", resource=ala_config.USER_DETAILS_ENDPOINT)
-        resp = requests.post(
-            ala_config.USER_DETAILS_ENDPOINT + "?userName=" + creator + "&includeProps=true", auth=BearerAuth(token)
+        resp = ala_helper.http_request_with_retry(
+            "POST",
+            ala_config.USER_DETAILS_ENDPOINT + "?userName=" + creator + "&includeProps=true",
+            auth=BearerAuth(token),
         )
         user_info = {"id": creator, "firstName": creator, "lastName": creator, "email": creator}
         if resp.status_code == 200:

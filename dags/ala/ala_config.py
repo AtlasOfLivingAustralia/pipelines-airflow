@@ -4,14 +4,14 @@ from airflow.models import Variable
 
 ALA_API_KEY = Variable.get("ala_api_key")
 DOI_API_KEY = Variable.get("doi_api_key")
-ALA_API_URL = Variable.get("ala_api_url")
+# ALA_API_URL = Variable.get("ala_api_url")
 AUTH_SCOPE = Variable.get("auth_scope")
 AUTH_CLIENT_ID = Variable.get("auth_client_id")
 AUTH_CLIENT_SECRET = Variable.get("auth_client_secret")
 AUTH_TOKEN_URL = Variable.get("ala_oidc_url")
 USER_DETAILS_ENDPOINT = Variable.get("user_details_endpoint")
 ALERT_EMAIL = Variable.get("alert_email")
-BACKUP_LOCATION = Variable.get("s3_bucket_backup")
+# BACKUP_LOCATION = Variable.get("s3_bucket_backup")
 BIOCACHE_URL = Variable.get("biocache_url")
 BIOCACHE_WS = BIOCACHE_URL
 COLLECTORY_SERVER = Variable.get("registry_url")
@@ -34,8 +34,11 @@ EMR_LARGE_CLUSTER_NODE_COUNT = int(Variable.get("emr_large_cluster_node_count"))
 EMR_XLARGE_CLUSTER_NODE_COUNT = int(Variable.get("emr_xlarge_cluster_node_count"))
 EMR_SMALL_CLUSTER_TOTAL_THRESHOLD = int(Variable.get("emr_small_cluster_total_threshold"))
 EMR_LARGE_CLUSTER_TOTAL_THRESHOLD = int(Variable.get("emr_large_cluster_total_threshold"))
+MAX_SMALL_INGEST_DATASET_SIZE = int(Variable.get("max_small_ingest_dataset_size"))
+MIN_XLARGE_INGEST_DATASET_SIZE = int(Variable.get("min_xlarge_ingest_dataset_size"))
 EMR_RELEASE = Variable.get("emr_release")
 EMR_RELEASE_PREINGESTION = Variable.get("emr_release_preingestion")
+EMR_SECURITY_CONFIGURATION = Variable.get("emr_security_configuration")
 ENVIRONMENT_TYPE = Variable.get("environment")
 ES_ALIAS = Variable.get("es_alias")
 ES_HOSTS = Variable.get("es_hosts")
@@ -51,8 +54,9 @@ MIN_DRS_PER_BATCH = int(Variable.get("min_drs_per_batch"))
 NO_OF_DATASET_BATCHES = int(Variable.get("no_of_dataset_batches"))
 NAME_MATCHING_URL = Variable.get("name_matching_url")
 REGISTRY_URL = COLLECTORY_SERVER
-PREINGESTION_AMI = Variable.get("preingestion_ami")
-S3_ALA_UPLOADED_BUCKET = Variable.get("s3_bucket_ala_uploaded")
+REGISTRY_USE_JWT = Variable.get("registry_use_jwt", "false").lower() in ("true", "1", "t")
+# PREINGESTION_AMI = Variable.get("preingestion_ami")
+# S3_ALA_UPLOADED_BUCKET = Variable.get("s3_bucket_ala_uploaded")
 S3_BACKUP_BUCKET = Variable.get("s3_bucket_backup")
 S3_BUCKET = Variable.get("s3_bucket")
 S3_BUCKET_DWCA = Variable.get("s3_bucket_dwca")
@@ -84,6 +88,9 @@ ZK_URL = Variable.get("zk_url")
 EC2_ADDITIONAL_MASTER_SECURITY_GROUPS = Variable.get("ec2_additional_master_security_groups").split(",")
 EC2_ADDITIONAL_SLAVE_SECURITY_GROUPS = Variable.get("ec2_additional_slave_security_groups").split(",")
 KEEP_EMR_ALIVE = Variable.get("keep_emr_alive_after_finish", "false").lower() in ("true", "1", "t")
+
+# if not set this will be relying on the current default java version
+EMR_JAVA_HOME = Variable.get("emr_java_home", "")
 
 
 def get_bootstrap_actions(bootstrap_script):
@@ -144,6 +151,7 @@ def get_bootstrap_config():
                 f"{SOLR_CONFIGSET}",  # 13
                 f"{ES_HOSTS}",  # 14
                 f"{ES_ALIAS}",  # 15
+                f"{EMR_JAVA_HOME}",  # 16
             ],
             "Path": f"s3://{S3_BUCKET}/airflow/dags/sh/bootstrap-la-pipelines-config.sh",
         },

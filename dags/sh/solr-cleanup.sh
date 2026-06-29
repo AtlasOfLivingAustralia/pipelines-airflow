@@ -47,10 +47,6 @@ function rebalance_cluster() {
 }
 
 
-# Rebalance the cluster before start
-echo "Rebalancing the cluster before start"
-rebalance_cluster "$COLLECTIONS"
-
 # FILEPATH: Untitled-1
 collection_dirs=$(du -s $DIR/$ALIAS_PATTERN-*)
 
@@ -94,7 +90,7 @@ done
 echo
 echo
 
-#Check if the node has joined to the cluster
+# Check if the node has joined to the cluster
 echo "Checking if the node has joined to the cluster by checking number of live nodes using jq"
 until [ $(curl --silent "http://localhost:8983/solr/admin/collections?action=CLUSTERSTATUS&wt=json" | jq '.cluster.live_nodes | length') -eq $NUM_NODES ]; do
     printf '.'
@@ -102,8 +98,11 @@ until [ $(curl --silent "http://localhost:8983/solr/admin/collections?action=CLU
 done
 echo
 echo
+
 # Rebalance the cluster
 echo "Rebalancing the cluster"
+# Re-fetch active collections to ensure we have the most up-to-date list
+COLLECTIONS=$(curl --silent "http://localhost:8983/solr/admin/collections?action=LIST&wt=json" | jq -r '.collections[]')
 rebalance_cluster "$COLLECTIONS"
 
 
