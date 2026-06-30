@@ -96,7 +96,7 @@ The following Airflow Variables must be configured for the repository to functio
 | Variable | Example Value | Purpose |
 |----------|---------------|---------|
 | `max_small_ingest_dataset_size` | `5000000` | Max size of darwin core archive file in bytes to qualify for small ingest |
-| `min_xlarge_ingest_dataset_size` | `1000000000` | Minimum size of darwin core archive file in bytes to qualify for xlarge ingest |
+| `min_xlarge_ingest_dataset_size` | `1000000000` | Min size of darwin core archive file in bytes to qualify for xlarge ingest |
 | `emr_small_cluster_node_count` | `10` | Number of nodes for small dataset processing |
 | `emr_large_cluster_node_count` | `8` | Number of nodes for large dataset processing |
 | `emr_xlarge_cluster_node_count` | `3` | Number of nodes for extra-large datasets |
