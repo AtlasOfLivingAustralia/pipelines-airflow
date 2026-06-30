@@ -32,7 +32,7 @@ This repository defines production Airflow DAGs for: bulk dataset ingestion (par
 
 ## Compatibility & Versioning
 
-Current version: **2.0.0**
+Current version: **2.1.0**
 
 Validated stack:
 * Apache Airflow 2.10.3 (see constraints URL in [`dags/requirements.txt`](dags/requirements.txt))
