@@ -2,7 +2,7 @@
 
 Airflow DAG collection orchestrating Atlas of Living Australia data ingestion, enrichment, and indexing on Amazon EMR and SOLR.
 
-> Version: **2.0.0** (tested with Apache Airflow 2.10.3 & Python 3.11)
+> Version: **2.1.0** (tested with Apache Airflow 2.10.3 & Python 3.11)
 
 ---
 
@@ -83,17 +83,20 @@ The following Airflow Variables must be configured for the repository to functio
 |----------|---------------|---------|
 | `s3_bucket_avro` | `<s3_bucket>` | Primary S3 bucket for Avro datasets and pipeline data |
 | `emr_release` | `emr-5.36.2` | EMR release version for main processing clusters |
-| `emr_release_preingestion` | `emr-6.15.0` | EMR release for pre-ingestion processing |
+| `emr_release_preingestion` | `emr-7.13.0` | EMR release for pre-ingestion processing |
 | `ec2_subnet_id` | `subnet-xxxxxxxxxxxxxxxxx` | VPC subnet for EMR clusters |
 | `job_flow_role` | `<job_flow_role>` | IAM role for EMR EC2 instances |
 | `service_role` | `<service_role>` | IAM role for EMR service |
 | `ec2_additional_master_security_groups` | `sg-xxxxxxxxxxxxxxxxx` | Security groups for EMR master nodes |
 | `ec2_additional_slave_security_groups` | `sg-xxxxxxxxxxxxxxxxx` | Security groups for EMR worker nodes |
+| `emr_security_configuration` | `<emr_security_configuration>` | Security Configuration Policy for EMR cluster |
 
 #### Cluster Sizing & Performance (Essential)
 
 | Variable | Example Value | Purpose |
 |----------|---------------|---------|
+| `max_small_ingest_dataset_size` | `5000000` | Max size of darwin core archive file in bytes to qualify for small ingest |
+| `min_xlarge_ingest_dataset_size` | `1000000000` | Minimum size of darwin core archive file in bytes to qualify for xlarge ingest |
 | `emr_small_cluster_node_count` | `10` | Number of nodes for small dataset processing |
 | `emr_large_cluster_node_count` | `8` | Number of nodes for large dataset processing |
 | `emr_xlarge_cluster_node_count` | `3` | Number of nodes for extra-large datasets |
@@ -111,7 +114,7 @@ The following Airflow Variables must be configured for the repository to functio
 | Variable | Example Value | Purpose |
 |----------|---------------|---------|
 | `ala_api_key` | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` | API key for LA services authentication |
-| `ala_api_url` | `https://api.your-domain` | Base URL for LA API services |
+| `registry_use_jwt` | `False` | Set to True if collectory uses JWT Authentication |
 | `registry_url` | `https://collections.your-domain/ws/` | Collections registry service URL |
 | `biocache_url` | `https://biocache-ws.your-domain/ws` | Biocache web service URL |
 | `name_matching_url` | `https://namematching-ws.your-domain/` | Taxonomic name matching service |
@@ -199,11 +202,10 @@ airflow pools set ingest_all_xlarge_pool 3 "XLarge per-dataset ingest"
 
 ## Ingestion & Partitioning Strategy
 
-1. List all candidate datasets (DwCA / Avro) in S3.
-2. Sort ascending by size; distribute through small & large categories via per‑cluster cumulative threshold (round‑robin layered assignment).
-3. Remaining datasets become xlarge (unbounded) and each is triggered individually.
-4. Pools regulate concurrency; each mapped trigger optionally waits for completion.
-5. Optional full index DAG executes after all ingestion pathways finish.
+1. List all valid candidate datasets (DwCA / Avro) in S3.
+2. Sort ascending by size; distribute through small, large and xlarge categories.
+3. Pools regulate concurrency; each mapped trigger optionally waits for completion.
+4. Optional full index DAG executes after all ingestion pathways finish.
 
 Benefits: balanced cluster utilization, predictable parallelism, fine-grained control of heavy datasets, reduced wasted capacity.
 
