@@ -149,6 +149,7 @@ The following Airflow Variables must be configured for the repository to functio
 
 | Variable | Example Value | Purpose |
 |----------|---------------|---------|
+| `emr_java_home` | `/usr/lib/jvm/java-17-amazon-corretto.aarch64/bin/java` | Java version to use for pipelines ingestion |
 | `environment` | `TEST` | Environment identifier (TEST/PROD) |
 | `slack_notification` | `False` | Enable Slack notifications |
 | `slack_alerts_channel` | `#airflow-alerts-public` | Slack channel for alerts |
