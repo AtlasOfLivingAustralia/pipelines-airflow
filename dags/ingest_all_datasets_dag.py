@@ -169,9 +169,16 @@ def partition_datasets_callable(**kwargs):
     ti = kwargs["ti"]
     datasets = ti.xcom_pull(task_ids="list_datasets_in_bucket") or {}
     if not datasets:
-        raise AirflowSkipException("No datasets discovered")
+        raise AirflowException("No datasets discovered")
 
     small_drs, large_drs, xlarge_drs = ala_helper.get_datasets_sizing(datasets)
+    logging.info("Total datasets: %d", len(datasets))
+    logging.info(
+        "Number of smallest, large, xlarge datasets: %d, %d, %d", len(small_drs), len(large_drs), len(xlarge_drs)
+    )
+    logging.info("small datasets: %s", small_drs)
+    logging.info("large datasets: %s", large_drs)
+    logging.info("xlarge datasets: %s", xlarge_drs)
 
     category_specs = [
         ("small", SMALL_INGEST_TASKS, SMALL_TOTAL_THRESHOLD, small_drs),
