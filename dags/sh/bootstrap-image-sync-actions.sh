@@ -5,7 +5,7 @@ echo 'S3 bucket to use: $S3_BUCKET'
 
 # create directories
 sudo mkdir -p /data/la-pipelines/config
-sudo chown hadoop:hadoop -R /data/la-pipelines/*
+#sudo chown hadoop:hadoop -R /data/la-pipelines/*
 
 # config files and JAR
 sudo aws s3 cp s3://$S3_BUCKET/logback.xml  /data/la-pipelines/config
@@ -24,7 +24,7 @@ sudo chmod -R 777 /usr/bin/la-pipelines
 sudo chmod -R 777 /usr/share/la-pipelines/logging_lib.sh
 
 # script to download AVRO from S3
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-datasets-image-sync.sh  /tmp/download-datasets-image-sync.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-datasets-image-sync.sh  /tmp/download-datasets-image-sync.sh
 sudo chmod -R 777 /tmp/download-datasets-image-sync.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/upload-indexed-image-sync-datasets.sh  /tmp/upload-indexed-image-sync-datasets.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/upload-indexed-image-sync-datasets.sh  /tmp/upload-indexed-image-sync-datasets.sh
 sudo chmod -R 777 /tmp/upload-indexed-image-sync-datasets.sh

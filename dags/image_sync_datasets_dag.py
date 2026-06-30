@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.utils.dates import days_ago
 from datetime import timedelta
 from ala.ala_helper import get_image_sync_steps, get_default_args
-from ala import ala_config, ala_helper, cluster_setup
+from ala import ala_config, cluster_setup
 
 DAG_ID = 'Image_sync_datasets'
 
@@ -14,13 +14,15 @@ def get_spark_steps(dataset_list: str):
 
 
 with DAG(
-        dag_id=DAG_ID,
-        default_args=get_default_args(),
-        description="Image Sync Datasets",
-        dagrun_timeout=timedelta(hours=8),
-        start_date=days_ago(1),
-        schedule_interval=None,
-        tags=['emr', 'multiple-dataset'],
-        params={"datasetIds": "dr359 dr2009"}
+    dag_id=DAG_ID,
+    default_args=get_default_args(),
+    description="Image Sync Datasets",
+    dagrun_timeout=timedelta(hours=8),
+    start_date=days_ago(1),
+    schedule_interval=None,
+    tags=['emr', 'multiple-dataset'],
+    params={"datasetIds": "dr359 dr2009"},
 ) as dag:
-    cluster_setup.run_large_emr(dag, get_spark_steps(datasetId), "bootstrap-image-sync-actions.sh", cluster_size=4)
+    cluster_setup.run_large_emr(
+        dag, get_spark_steps(datasetId), "bootstrap-image-sync-actions.sh", cluster_size=4, dataset_ids=datasetId
+    )

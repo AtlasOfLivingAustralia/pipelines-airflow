@@ -3,6 +3,9 @@ set -x
 s3_bucket_dwca=$1
 s3_bucket_avro=$2
 
+sudo chown hadoop:hadoop -R /mnt/dwca-tmp
+sudo chown hadoop:hadoop -R /data/*
+
 for ((i = 3; i <= $#; i++ )); do
 
   export datasetId=${!i}
@@ -16,9 +19,10 @@ for ((i = 3; i <= $#; i++ )); do
   echo "cd /data/biocache-load/$datasetId"
   cd "/data/biocache-load/$datasetId"
   echo $PWD
-  echo "jar xf $datasetId.zip"
-  sudo -u hadoop jar xf $datasetId.zip
-
+#  echo "jar xf $datasetId.zip"
+#  sudo -u hadoop jar xf $datasetId.zip
+  echo "unzip $datasetId.zip"
+  sudo -u hadoop unzip $datasetId.zip
   # Download existing identifiers from s3.
   # Note: For new drs, ala_uuid folder should not exist on the emr, if it does, the uuid step will error as there are not avro files inside
   export identifier_path=s3://$s3_bucket_avro/pipelines-data/$datasetId/1/identifiers/ala_uuid

@@ -5,6 +5,7 @@ echo "S3 bucket to use: $S3_BUCKET"
 
 sudo pip3 install -U FrictionlessDarwinCore
 
+yum install -y unzip
 # set up name service
 #sudo yum install -y docker
 #sudo systemctl start docker
@@ -26,8 +27,8 @@ sudo mkdir -p /data/pipelines-species
 sudo mkdir -p /data/dwca-tmp/
 sudo chmod -R 777 /data/dwca-tmp/
 sudo mkdir -p /data/spark-tmp
-sudo chown hadoop:hadoop -R /mnt/dwca-tmp
-sudo chown hadoop:hadoop -R /data/*
+#sudo chown hadoop:hadoop -R /mnt/dwca-tmp
+#sudo chown hadoop:hadoop -R /data/*
 
 # get SHP files
 sudo aws s3 cp s3://$S3_BUCKET/pipelines-shp/ /data/pipelines-shp/ --recursive --include "*"
@@ -51,13 +52,13 @@ sudo chmod -R 777 /usr/bin/la-pipelines
 sudo chmod -R 777 /usr/share/la-pipelines/logging_lib.sh
 
 # Download / Upload scripts
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-datasets.sh  /tmp/download-datasets.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-datasets.sh  /tmp/download-datasets.sh
 sudo chmod -R 777 /tmp/download-datasets.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/download-datasets-avro.sh  /tmp/download-datasets-avro.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/download-datasets-avro.sh  /tmp/download-datasets-avro.sh
 sudo chmod -R 777 /tmp/download-datasets-avro.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/upload-datasets.sh  /tmp/upload-datasets.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/upload-datasets.sh  /tmp/upload-datasets.sh
 sudo chmod -R 777 /tmp/upload-datasets.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/upload-export.sh  /tmp/upload-export.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/upload-export.sh  /tmp/upload-export.sh
 sudo chmod -R 777 /tmp/upload-export.sh
-sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/frictionless.sh  /tmp/frictionless.sh
+sudo aws s3 cp s3://$S3_BUCKET/airflow/dags/sh/frictionless.sh  /tmp/frictionless.sh
 sudo chmod -R 777 /tmp/frictionless.sh
