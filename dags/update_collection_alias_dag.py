@@ -174,6 +174,13 @@ with DAG(
         task_id="remove_old_collections", python_callable=remove_old_collections, provide_context=True
     )
 
+    update_data_currency_task = TriggerDagRunOperator(
+        task_id="update_data_currency_task",
+        trigger_dag_id="Update-Data-Currency",
+        wait_for_completion=True,
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
+    )
+
     assertion_sync_task = TriggerDagRunOperator(
         task_id="assertion_sync_task",
         trigger_dag_id="Assertions-Sync",
@@ -201,6 +208,7 @@ with DAG(
             (PythonOperator(task_id=check, python_callable=locals()[check], provide_context=True, pool="solr_queries"))
     current_asserted_records_task >> index_checks_task_grp >> switch_collection_alias_op
     switch_collection_alias_op >> remove_old_collections_op
+    switch_collection_alias_op >> update_data_currency_task
     remove_old_collections_op >> assertion_sync_task >> clear_dashboards_task
     remove_old_collections_op >> update_gbif_task
     [update_gbif_task, clear_dashboards_task] >> ala_helper.get_success_notification_operator()
