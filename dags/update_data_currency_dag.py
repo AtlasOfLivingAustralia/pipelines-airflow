@@ -22,7 +22,7 @@ with DAG(
     params={}
 ) as dag:
     
-    def update_dates_from_solr():
+    def update_dates_from_solr() -> None:
         solr_facet = "lastLoadDate"
         collectory_value = "dataCurrency"
 
@@ -53,15 +53,16 @@ with DAG(
             log.info(f"Got {response.status_code} from solr: {response.reason}")
             AirflowException(f"Got error from solr: {payload['error']['msg']}")
 
+        solr_errors = []
+        collectory_errors = []
         distinct_items = payload["facets"]["distinct_items"]
-        log.info(f"Retrieved {distinct_items['numBuckets']} distinct items with facet: {solr_facet}")
-
         for bucket in distinct_items["buckets"]:
             dr_uid = bucket["val"]
 
             value = bucket.get(solr_facet, "")
             if not value:
-                log.info(f"Skipping {collectory_value} update for dr {dr_uid}, solr value is empty")
+                log.warning(f"Skipping {collectory_value} update for dr {dr_uid}, solr value is empty")
+                solr_errors.append(dr_uid)
                 continue
 
             try:
@@ -69,6 +70,17 @@ with DAG(
                 log.info(f"Updated {collectory_value} for dr {dr_uid} to: {value}")
             except Exception as e:
                 log.error(f"Error updating {collectory_value} for dr {dr_uid}: {e}")
+                collectory_errors.append(dr_uid)
+
+        def _print_errors(error_uids: list[str]) -> str:
+            return '' if not error_uids else (": " + ", ".join(error_uids))
+
+        total_buckets = distinct_items["numBuckets"]
+        total_failed = len(solr_errors) + len(collectory_errors)
+        log.info(f"Total data resources with '{solr_facet}' in solr: {total_buckets}")
+        log.info(f"Succecssfully updated '{collectory_value}' for {total_buckets - total_failed} data resources in collectory")
+        log.info(f"Failed to update {len(solr_errors)} data resoures with no solr value{_print_errors(solr_errors)}")
+        log.info(f"Failed to update {len(collectory_errors)} data resources with collectory issue{_print_errors(collectory_errors)}")
 
     update_data_currency_values = PythonOperator(
         task_id="update_date_currency_dates",
