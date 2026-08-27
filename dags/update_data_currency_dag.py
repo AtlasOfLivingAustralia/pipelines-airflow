@@ -53,7 +53,10 @@ with DAG(
             log.info(f"Got {response.status_code} from solr: {response.reason}")
             AirflowException(f"Got error from solr: {payload['error']['msg']}")
 
-        for bucket in payload["facets"]["distinct_items"]["buckets"]:
+        distinct_items = payload["facets"]["distinct_items"]
+        log.info(f"Retrieved {distinct_items['numBuckets']} distinct items with facet: {solr_facet}")
+
+        for bucket in distinct_items["buckets"]:
             dr_uid = bucket["val"]
 
             value = bucket.get(solr_facet, "")
