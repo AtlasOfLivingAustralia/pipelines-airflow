@@ -1,33 +1,33 @@
 import logging as log
 from datetime import timedelta
 import requests
-from airflow import DAG
-from airflow.utils.dates import days_ago
-from airflow.operators.python import PythonOperator
+from airflow.sdk import dag, task
 from airflow.exceptions import AirflowException
 from ala.ala_helper import get_default_args, update_registry_metadata
 from ala import ala_config
 
-DAG_ID = "Update-Data-Currency"
-
-with DAG(
-    dag_id=DAG_ID,
-    description="Update data currency field in collectory of all datasets in solr",
+@dag(
+    dag_id="Update-Data-Currency",
+    description="Update data currency field of all datasets in solr",
     default_args=get_default_args(),
     dagrun_timeout=timedelta(hours=8),
-    start_date=days_ago(1),
     schedule_interval=None,
     tags=["emr", "all-datasets"],
-    params={
-        "datasetIds": ""
-    }
-) as dag:
-    
-    def update_dates_from_solr(datasetIDs: str) -> None:
-        filter_uid_list = [] if datasetIDs == "None" else datasetIDs.split() # Empty str passed in as "None"
+)
+def update_data_currency_values(datasetIDs: str = ""):
+    """
+    Updates dataCurrency field in collectory from the max lastLoadDate value for the respective data resource in solr
+    Passing no datasetIDs gets every available data resource in solr and updates collectory
 
-        solr_facet = "lastLoadDate"
-        collectory_value = "dataCurrency"
+    Defaults to all data resources
+    """
+
+    solr_facet = "lastLoadDate"
+    collectory_value = "dataCurrency"
+
+    @task(multiple_outputs=True)
+    def get_solr_load_dates(datasetIDs: str) -> dict:
+        filter_uid_list = [] if datasetIDs == "None" else datasetIDs.split() # Empty str passed in as "None"
 
         url = f"{ala_config.SOLR_URL}/biocache/select"
         headers = {
@@ -49,12 +49,15 @@ with DAG(
         }
 
         log.info(f"Querying solr at {url}")
-        response = requests.post(url, headers=headers, json=params)
-        payload = response.json()
+        response = requests.post(url, headers=headers, json=params, timeout=60)
+
+        try:
+            payload = response.json()
+        except ValueError as e:
+            raise AirflowException(f"Non-JSON response from solr ({response.status_code}): {response.text}") from e
 
         if response.status_code != 200:
-            log.info(f"Got {response.status_code} from solr: {response.reason}")
-            AirflowException(f"Got error from solr: {payload['error']['msg']}")
+            raise AirflowException(f"Got error from solr({response.status_code} - {response.reason}): {payload['error']['msg']}")
 
         # Get required updates from payload
         updates = {}
@@ -66,11 +69,25 @@ with DAG(
 
             updates[dr_uid] = bucket.get(solr_facet, "")
 
-        # Apply updates and collect error uids
+        # Put None in place of updates that aren't in solr
+        for dr_uid in filter_uid_list:
+            if dr_uid not in updates:
+                updates[dr_uid] = None
+
+        return updates
+
+    @task
+    def update_collectory_data_currency(updates: dict) -> None:
+        solr_errors = []
         value_errors = []
         collectory_errors = []
+
         for dr_uid, value in updates.items():
-            if not value:
+            if value is None: # dr_uid not returned from solr
+                log.error(f"Error updating {dr_uid}, no data resource found in solr")
+                solr_errors.append(dr_uid)
+
+            if not value: # Value from solr was empty
                 log.warning(f"Skipping {collectory_value} update for {dr_uid}, solr value is empty")
                 value_errors.append(dr_uid)
                 continue
@@ -82,30 +99,20 @@ with DAG(
                 log.error(f"Error updating {collectory_value} for {dr_uid}: {e}")
                 collectory_errors.append(dr_uid)
 
-        solr_errors = []
-        for dr_uid in filter_uid_list:
-            if dr_uid not in updates:
-                log.error(f"Error updating {dr_uid}, no data resource found in solr")
-                solr_errors.append(dr_uid)
-
-        # Log activity
+        # Log update activity
         def _item_str(item_list: list[str]) -> str:
             return '' if not item_list else (": " + ", ".join(item_list))
 
-        def _dr_count_str(count: int) -> str:
-            return f"{count} data resource{'s' if count != 1 else ''}"
+        failed = sum(len(errors) for errors in [solr_errors, value_errors, collectory_errors])
+        success = len(updates) - failed
 
-        selected_buckets = len(updates)
-        success = selected_buckets - (len(value_errors) + len(collectory_errors)) # Solr errors not in updates, dont subtract
+        log.info(f"Found {len(updates)} matching data resource(s) in solr with '{solr_facet}'")
+        log.info(f"Successfully updated '{collectory_value}' for {success} in collectory")
+        log.info(f"Failed to update {len(value_errors)} data resource(s) with no solr value{_item_str(value_errors)}")
+        log.info(f"Failed to update {len(collectory_errors)} data resource(s) with collectory issue{_item_str(collectory_errors)}")
+        log.info(f"Failed to update {len(solr_errors)} data resource(s) as dr doesn't exist in solr{_item_str(solr_errors)}")
 
-        log.info(f"Found {_dr_count_str(selected_buckets)} in solr with '{solr_facet}'")
-        log.info(f"Succecssfully updated '{collectory_value}' for {_dr_count_str(success)} in collectory")
-        log.info(f"Failed to update {_dr_count_str(len(value_errors))} with no solr value{_item_str(value_errors)}")
-        log.info(f"Failed to update {_dr_count_str(len(collectory_errors))} with collectory issue{_item_str(collectory_errors)}")
-        log.info(f"Failed to update {_dr_count_str(len(solr_errors))} as dr doesn't exist in solr{_item_str(solr_errors)}")
+    updates = get_solr_load_dates(datasetIDs)
+    update_collectory_data_currency(updates)
 
-    update_data_currency_values = PythonOperator(
-        task_id="update_date_currency_dates",
-        python_callable=update_dates_from_solr,
-        op_args=["{{ params.datasetIds }}"]
-    )
+update_data_currency_values()
