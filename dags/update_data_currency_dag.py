@@ -18,8 +18,6 @@ def update_data_currency_values(datasetIDs: str = ""):
     """
     Updates dataCurrency field in collectory from the max lastLoadDate value for the respective data resource in solr  
     Passing no datasetIDs gets every available data resource in solr and updates collectory
-
-    Defaults to all data resources
     """
 
     solr_facet = "lastLoadDate"
@@ -27,10 +25,32 @@ def update_data_currency_values(datasetIDs: str = ""):
 
     @task(multiple_outputs=True, show_return_value_in_logs=False)
     def get_solr_load_dates(datasetIDs: str) -> dict:
-        filter_uid_list = datasetIDs.split()
+
+        def sanitise_input() -> list[str]:
+            if not isinstance(datasetIDs, str): # Airflow passes empty string as None
+                return []
+
+            filter_list = datasetIDs.split()
+            if not filter_list: # datasetIDs provided as empty string
+                return []
+
+            bad_uids = []
+            for uid in filter_list:
+                if not uid.startswith("dr"):
+                    bad_uids.append(uid)
+
+            if bad_uids == filter_list:
+                raise AirflowException(f"No valid data resources provided")
+
+            for uid in bad_uids:
+                log.warning(f"Dropping bad provided datasetID: {uid}")
+                filter_list.pop(uid)
+
+            return filter_list
+
+        filter_uid_list = sanitise_input()
 
         solr_bucket_name = "distinct_items"
-
         url = f"{ala_config.SOLR_URL}/biocache/select"
         headers = {
             "User-Agent": "dataCurrencyDAG"
@@ -79,6 +99,7 @@ def update_data_currency_values(datasetIDs: str = ""):
             if dr_uid not in updates:
                 updates[dr_uid] = None
 
+        log.info(f"There are {len(updates)} data resources to update")
         return updates
 
     @task
