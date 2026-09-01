@@ -1,10 +1,21 @@
 import logging as log
-from datetime import timedelta
+from datetime import datetime, timedelta
 import requests
 from airflow.decorators import dag, task
 from airflow.exceptions import AirflowException
 from ala.ala_helper import get_default_args, update_registry_metadata
 from ala import ala_config
+
+def validate_response_payload(response: requests.Response) -> dict:
+    try:
+        payload = response.json()
+    except ValueError as e:
+        raise AirflowException(f"Non-JSON response from solr ({response.status_code}): {response.text}") from e
+
+    if response.status_code != 200:
+        raise AirflowException(f"Got error from solr({response.status_code} - {response.reason}): {payload['error']['msg']}")
+
+    return payload
 
 @dag(
     dag_id="Update-Data-Currency",
@@ -14,17 +25,45 @@ from ala import ala_config
     schedule_interval=None,
     tags=["emr", "all-datasets"],
 )
-def update_data_currency_values(datasetIDs: str = ""):
+def update_data_currency_values(datasetIDs: str = "", days_before_collection: int = 1, force_update: bool = False):
     """
     Updates dataCurrency field in collectory from the max lastLoadDate value for the respective data resource in solr  
-    Passing no datasetIDs gets every available data resource in solr and updates collectory
+    Passing no datasetIDs gets every available data resource in solr and updates collectory  
+    Parameter days_before_collection is a delta to set back solr colletion date by when checking for new updates  
+    Forcing update will overwrite this check completely and allow all values to be updated
     """
 
+    # Data values
     solr_facet = "lastLoadDate"
     collectory_value = "dataCurrency"
 
+    # Request properties
+    solr_alias = "biocache"
+    request_headers = {
+        "User-Agent": "dataCurrencyDAG"
+    }
+    request_timeout = 60
+
+    @task
+    def get_solr_reference_date(days_before_collection: int, force_update: bool) -> str:
+        if force_update:
+            return ""
+        
+        url = f"{ala_config.SOLR_URL}/admin/collections"
+        params = {
+            "action": "LISTALIASES"
+        }
+
+        log.info(f"Getting solr date from {url}")
+        response = requests.get(url, headers=request_headers, params=params, timeout=request_timeout)
+        payload = validate_response_payload(response)
+
+        collection_name = payload["aliases"][solr_alias]
+        collection_timestamp = datetime.fromisoformat(collection_name.split("-", 1)[-1]) - timedelta(days=days_before_collection)
+        return collection_timestamp.isoformat()
+
     @task(multiple_outputs=False, show_return_value_in_logs=False)
-    def get_solr_load_dates(datasetIDs: str) -> dict[str, str]:
+    def get_solr_load_dates(datasetIDs: str, solr_reference_date: str) -> dict[str, str]:
 
         def sanitise_input() -> list[str]:
             if not isinstance(datasetIDs, str): # Airflow passes empty string as None
@@ -50,13 +89,11 @@ def update_data_currency_values(datasetIDs: str = ""):
             return filter_list
 
         filter_uid_list = sanitise_input()
+        if not isinstance(solr_reference_date, str): # Handle empty string as None
+            solr_reference_date = ""
 
         solr_bucket_name = "distinct_items"
-        url = f"{ala_config.SOLR_URL}/biocache/select"
-        headers = {
-            "User-Agent": "dataCurrencyDAG"
-        }
-
+        url = f"{ala_config.SOLR_URL}/{solr_alias}/select"
         params = {
             "query": "*:*",
             "limit": 0,
@@ -72,15 +109,8 @@ def update_data_currency_values(datasetIDs: str = ""):
         }
 
         log.info(f"Querying solr at {url}")
-        response = requests.post(url, headers=headers, json=params, timeout=60)
-
-        try:
-            payload = response.json()
-        except ValueError as e:
-            raise AirflowException(f"Non-JSON response from solr ({response.status_code}): {response.text}") from e
-
-        if response.status_code != 200:
-            raise AirflowException(f"Got error from solr({response.status_code} - {response.reason}): {payload['error']['msg']}")
+        response = requests.post(url, headers=request_headers, json=params, timeout=request_timeout)
+        payload = validate_response_payload(response)
 
         payload = payload["facets"][solr_bucket_name] # Overwrite initial payload with just the returned bucket
         log.info(f"Found {payload['numBuckets']} data resources in solr with facet '{solr_facet}'")
@@ -93,9 +123,15 @@ def update_data_currency_values(datasetIDs: str = ""):
             if filter_uid_list and (dr_uid not in filter_uid_list):
                 continue
 
-            updates[dr_uid] = bucket.get(solr_facet, "")
+            value = bucket.get(solr_facet, "")
+            if (
+                not value # Keep empty values to report errors later
+                or not solr_reference_date # Keep all values if no ref date
+                or datetime.fromisoformat(value) > datetime.fromisoformat(solr_reference_date) # Keep valid values
+            ):
+                updates[dr_uid] = value
 
-        # Put None in place of updates that aren't in solr
+        # Put None in place of updates that aren't in solr to report errors later
         for dr_uid in filter_uid_list:
             if dr_uid not in updates:
                 updates[dr_uid] = None
@@ -138,7 +174,8 @@ def update_data_currency_values(datasetIDs: str = ""):
         log.info(f"Failed to update {len(value_errors)} data resource(s) with no solr value{_item_str(value_errors)}")
         log.info(f"Failed to update {len(collectory_errors)} data resource(s) due to collectory issue{_item_str(collectory_errors)}")
 
-    updates = get_solr_load_dates(datasetIDs)
+    solr_ref_date = get_solr_reference_date(days_before_collection, force_update)
+    updates = get_solr_load_dates(datasetIDs, solr_ref_date)
     update_collectory_data_currency(updates)
 
 update_data_currency_values()
