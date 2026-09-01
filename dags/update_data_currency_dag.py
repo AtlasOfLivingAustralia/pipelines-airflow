@@ -23,8 +23,8 @@ def update_data_currency_values(datasetIDs: str = ""):
     solr_facet = "lastLoadDate"
     collectory_value = "dataCurrency"
 
-    @task(multiple_outputs=True, show_return_value_in_logs=False)
-    def get_solr_load_dates(datasetIDs: str) -> dict:
+    @task(multiple_outputs=False, show_return_value_in_logs=False)
+    def get_solr_load_dates(datasetIDs: str) -> dict[str, str]:
 
         def sanitise_input() -> list[str]:
             if not isinstance(datasetIDs, str): # Airflow passes empty string as None
@@ -37,14 +37,15 @@ def update_data_currency_values(datasetIDs: str = ""):
             bad_uids = []
             for uid in filter_list:
                 if not uid.startswith("dr"):
+                    log.warning(f"Bad data resource provided: {uid}")
                     bad_uids.append(uid)
 
             if bad_uids == filter_list:
                 raise AirflowException(f"No valid data resources provided")
 
             for uid in bad_uids:
-                log.warning(f"Dropping bad provided datasetID: {uid}")
-                filter_list.pop(uid)
+                log.warning(f"Dropping bad provided data resource: {uid}")
+                filter_list.remove(uid)
 
             return filter_list
 

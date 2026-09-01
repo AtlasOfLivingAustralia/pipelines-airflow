@@ -1084,14 +1084,14 @@ def update_registry_metadata(uid, metadata):
         metadata (dict): The metadata to update.
 
     Returns:
-        dict: The updated metadata of the dataset.
+        bytes: The raw response body from the Collectory update request.
     """
     if uid.startswith("dr"):
         resource_path = f"dataResource/{uid}"
     elif uid.startswith("dp"):
         resource_path = f"dataProvider/{uid}"
     else:
-        raise ValueError("Not a valid dataset or data provider uid: %s", uid)
+        raise ValueError(f"Not a valid dataset or data provider uid: {uid}")
 
     return json_parse(
         ala_config.COLLECTORY_SERVER,
