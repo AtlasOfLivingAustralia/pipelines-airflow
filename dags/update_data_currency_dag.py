@@ -45,9 +45,10 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
     request_timeout = 60
 
     @task
-    def get_solr_reference_date(days_before_collection: int, force_update: bool) -> str:
+    def get_solr_reference_date(days_before_collection: int, force_update: bool) -> str | None:
         if force_update:
-            return ""
+            log.info("Force update selected, skipping last solr collection date check")
+            return None
         
         url = f"{ala_config.SOLR_URL}/admin/collections"
         params = {
@@ -59,11 +60,14 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
         payload = validate_response_payload(response)
 
         collection_name = payload["aliases"][solr_alias]
-        collection_timestamp = datetime.fromisoformat(collection_name.split("-", 1)[-1]) - timedelta(days=days_before_collection)
+        collection_timestamp = datetime.fromisoformat(collection_name.split("-", 1)[-1])
+        log.info(f"Got solr collection date: {collection_timestamp}")
+        collection_timestamp -= timedelta(days=days_before_collection)
+        log.info(f"Using solr collection date rolled back by {days_before_collection} day(s) as update reference point")
         return collection_timestamp.isoformat()
 
     @task(multiple_outputs=False, show_return_value_in_logs=False)
-    def get_solr_load_dates(datasetIDs: str, solr_reference_date: str) -> dict[str, str]:
+    def get_solr_load_dates(datasetIDs: str, solr_reference_date: str | None) -> dict[str, str]:
 
         def sanitise_input() -> list[str]:
             if not isinstance(datasetIDs, str): # Airflow passes empty string as None
@@ -89,8 +93,6 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
             return filter_list
 
         filter_uid_list = sanitise_input()
-        if not isinstance(solr_reference_date, str): # Handle empty string as None
-            solr_reference_date = ""
 
         solr_bucket_name = "distinct_items"
         url = f"{ala_config.SOLR_URL}/{solr_alias}/select"
@@ -136,7 +138,13 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
             if dr_uid not in updates:
                 updates[dr_uid] = None
 
-        log.info(f"There are {len(updates)} data resources to update")
+        info_message = f"There are {len(updates)} data resources to update"
+        if filter_uid_list:
+            info_message += f" after applying data resource filter {filter_uid_list}"
+        if solr_reference_date:
+            info_message += f" with a date after {solr_reference_date}"
+
+        log.info(info_message)
         return updates
 
     @task
