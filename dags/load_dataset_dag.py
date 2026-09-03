@@ -11,7 +11,7 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.dates import days_ago
 from airflow.utils.trigger_rule import TriggerRule
-from ala import ala_config
+from ala import ala_config, ala_helper
 from ala.ala_helper import (
     download_file_with_retry,
     get_datasets_sizing,
@@ -101,7 +101,9 @@ with DAG(
     def get_dataset_size_list(**kwargs):
         datasets_param = kwargs["dag_run"].conf["datasetIds"]
         bucket = kwargs["bucket"]
-
+        dataset_list = datasets_param.split()
+        return ala_helper.get_dataset_sizing_from_datasets(bucket=bucket, datasets_list=dataset_list, sort_desc=True)
+        """
         # lookup size on S3
         datasets = {}
         s3 = boto3.resource("s3")
@@ -113,6 +115,7 @@ with DAG(
                 datasets[dataset] = archive_file.size
                 print(f"{dataset} = {archive_file.size}")
         return get_datasets_sizing(datasets, True)
+        """
 
     def list_small_datasets(**kwargs):
         ti = kwargs["ti"]
