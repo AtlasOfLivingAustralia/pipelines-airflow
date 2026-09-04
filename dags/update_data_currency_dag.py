@@ -38,7 +38,8 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
     collectory_value = "dataCurrency"
 
     # Request properties
-    solr_alias = "biocache"
+    base_url = ala_config.SOLR_URL
+    solr_alias = ala_config.SOLR_COLLECTION
     request_headers = {
         "User-Agent": "dataCurrencyDAG"
     }
@@ -50,7 +51,7 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
             log.info("Force update selected, skipping last solr collection date check")
             return None
         
-        url = f"{ala_config.SOLR_URL}/admin/collections"
+        url = f"{base_url}/admin/collections"
         params = {
             "action": "LISTALIASES"
         }
@@ -95,7 +96,7 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
         filter_uid_list = sanitise_input()
 
         solr_bucket_name = "distinct_items"
-        url = f"{ala_config.SOLR_URL}/{solr_alias}/select"
+        url = f"{base_url}/{solr_alias}/select"
         params = {
             "query": "*:*",
             "limit": 0,
