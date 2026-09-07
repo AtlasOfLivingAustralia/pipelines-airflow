@@ -25,12 +25,13 @@ def validate_response_payload(response: requests.Response) -> dict:
     schedule_interval=None,
     tags=["emr", "all-datasets"],
 )
-def update_data_currency_values(datasetIDs: str = "", days_before_collection: int = 1, force_update: bool = False):
+def update_data_currency_values(datasetIDs: str = "", force_update: bool = False):
     """
     Updates dataCurrency field in collectory from the max lastLoadDate value for the respective data resource in solr  
+    Value is only updated if last change was within a set amount of days before last solr update  
+    
     Passing no datasetIDs gets every available data resource in solr and updates collectory  
-    Parameter days_before_collection is a delta to set back solr colletion date by when checking for new updates  
-    Forcing update will overwrite this check completely and allow all values to be updated
+    Forcing update will overwrite the date check for last solr update and force all values to be updated
     """
 
     # Data values
@@ -46,7 +47,7 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
     request_timeout = 60
 
     @task
-    def get_solr_reference_date(days_before_collection: int, force_update: bool) -> str | None:
+    def get_solr_reference_date(force_update: bool) -> str | None:
         if force_update:
             log.info("Force update selected, skipping last solr collection date check")
             return None
@@ -63,8 +64,11 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
         collection_name = payload["aliases"][solr_alias]
         collection_timestamp = datetime.fromisoformat(collection_name.split("-", 1)[-1])
         log.info(f"Got solr collection date: {collection_timestamp}")
+
+        days_before_collection = ala_config.CURRENCY_UPDATE_DAYS_PRIOR
         collection_timestamp -= timedelta(days=days_before_collection)
         log.info(f"Using solr collection date rolled back by {days_before_collection} day(s) as update reference point")
+
         return collection_timestamp.isoformat()
 
     @task(multiple_outputs=False, show_return_value_in_logs=False)
@@ -183,7 +187,7 @@ def update_data_currency_values(datasetIDs: str = "", days_before_collection: in
         log.info(f"Failed to update {len(value_errors)} data resource(s) with no solr value{_item_str(value_errors)}")
         log.info(f"Failed to update {len(collectory_errors)} data resource(s) due to collectory issue{_item_str(collectory_errors)}")
 
-    solr_ref_date = get_solr_reference_date(days_before_collection, force_update)
+    solr_ref_date = get_solr_reference_date(force_update)
     updates = get_solr_load_dates(datasetIDs, solr_ref_date)
     update_collectory_data_currency(updates)
 
