@@ -53,6 +53,7 @@ MASTER_MARKET = Variable.get("master_market")
 MIN_DRS_PER_BATCH = int(Variable.get("min_drs_per_batch"))
 NO_OF_DATASET_BATCHES = int(Variable.get("no_of_dataset_batches"))
 NAME_MATCHING_URL = Variable.get("name_matching_url")
+NAME_MATCHING_WORKERS = int(Variable.get("name_matching_workers"))
 REGISTRY_URL = COLLECTORY_SERVER
 REGISTRY_USE_JWT = Variable.get("registry_use_jwt", "false").lower() in ("true", "1", "t")
 # PREINGESTION_AMI = Variable.get("preingestion_ami")
