@@ -1,13 +1,19 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib.parse import urljoin
 from urllib3.util import Retry
 import concurrent.futures as cf
 from enum import Enum
-import pandas as pd
 from pathlib import Path
 import time
-import logging
+from datetime import datetime
+import boto3
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 class Param(Enum):
     _HINTS     = "hints"
@@ -152,6 +158,8 @@ class NamesMatching:
 
     @start_session
     def run_series(self, series: pd.Series) -> pd.DataFrame:
+        import pandas as pd
+
         records = []
 
         with cf.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -172,6 +180,8 @@ class NamesMatching:
         return self.run_df(df).sort_index()
 
     def run_file(self, input_path: Path, output_path: Path, mappings: dict[Param, str] = {}, rows: int = 0, chunksize: int = 0) -> None:
+        import pandas as pd
+
         records_name = "all" if not rows else str(rows)
         read_kwargs = {
             "keep_default_na": False,
@@ -180,23 +190,64 @@ class NamesMatching:
             "iterator": chunksize == 0
         }
 
-        logging.info(f"Running name matching in '{self.env.name.lower()}' on {records_name} records using {self.method.name} method with {self.max_workers} workers")
+        print(f"Running name matching in '{self.env.name.lower()}' on {records_name} records using {self.method.name} method with {self.max_workers} workers")
 
         total_timer = TimeKeeper()
-        for idx, df in enumerate(pd.read_csv(input_path, **read_kwargs)):
+        for idx, df in enumerate(pd.read_csv(input_path, **read_kwargs), start=1):
             chunk_timer = TimeKeeper()
-            df = self.process_df(df, mappings, f"[chunk {idx+1}]")
+            df = self.process_df(df, mappings)
 
             # Reorder columns to align properly on subsequent writes
-            if idx == 0:
+            if idx == 1:
                 col_order = df.columns
             else:
                 df = df[col_order]
 
-            df.to_csv(output_path, mode="a", header=idx==0, index=False)
-            logging.info(f"Chunk {idx+1} finished in: {chunk_timer.get_diff()} | Total time: {total_timer.get_diff()}")
+            df.to_csv(output_path, mode="a", header=(idx==1), index=False)
+            print(f"Chunk {idx} finished in: {chunk_timer.get_diff()} | Total time: {total_timer.get_diff()}")
 
-        logging.info(f"Generated file {output_path}")
+        print(f"Generated file {output_path}")
+
+class S3FileManager:
+
+    def __init__(self, bucket: str, base_path: str = "", local_folder: str = ""):
+        self._bucket = bucket
+        self._s3_base_path = base_path.rstrip("/")
+        self._local_folder = local_folder.rstrip("/")
+
+        self.s3_client = None
+
+    def bucket_path(self, object_path: str) -> str:
+        return f"{self._s3_base_path}/{object_path.strip('/')}"
+
+    def uri_path(self, object_path: str) -> str:
+        return f"s3://{self._bucket}/{self._s3_base_path}/{object_path.strip('/')}"
+
+    def local_path(self, file_path: str) -> str:
+        return f"{self._local_folder}/{file_path.strip('/')}"
+
+    @staticmethod
+    def _get_client(func) -> callable:
+        def wrapper(self, *args, **kwargs) -> any:
+            if self.s3_client is None:
+                self.s3_client = boto3.client("s3")
+
+            return func(self, *args, **kwargs)
+        return wrapper
+
+    @_get_client
+    def download(self, s3_path: str, local_path: str = "") -> str:
+        local_path = self.local_path(local_path or s3_path)
+        self.s3_client.download_file(self._bucket, self.bucket_path(s3_path), self.local_path(local_path))
+        print(f"Copied file from {self.uri_path(s3_path)} to {local_path}")
+        return local_path
+
+    @_get_client
+    def upload(self, local_path: str, s3_path: str = "") -> str:
+        s3_path = s3_path or local_path
+        self.s3_client.upload_file(local_path, self._bucket, self.bucket_path(s3_path))
+        print(f"Copied file from {local_path} to {self.uri_path(s3_path)}")
+        return s3_path
 
 class TimeKeeper:
     def __init__(self):
