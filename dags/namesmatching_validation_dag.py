@@ -1,51 +1,7 @@
-import logging as log
-from datetime import timedelta
+from datetime import datetime, timedelta
 from airflow.decorators import dag, task
-from airflow.exceptions import AirflowException
 from ala.ala_helper import get_default_args
-import boto3
-from ala.namesmatching_service import Env
-
-class FileManager:
-
-    _s3_bucket = "ala-databox-avro"
-    _s3_base_path = "name-matching-reporting"
-    _local_folder = "/tmp"
-
-    def __init__(self):
-        self.s3_client = None
-
-    def get_bucket_path(self, object_name: str) -> str:
-        return f"{self._s3_base_path}/{object_name}"
-
-    def get_local_path(self, file_name: str) -> str:
-        return f"{self._local_folder}/{file_name}"
-
-    def get_uri_path(self, object_name: str) -> str:
-        return f"s3://{self._s3_bucket}/{self.get_bucket_path(object_name)}"
-
-    @staticmethod
-    def _get_client(func) -> callable:
-        def wrapper(self, *args, **kwargs) -> any:
-            if self.s3_client is None:
-                self.s3_client = boto3.client("s3")
-
-            return func(self, *args, **kwargs)
-        return wrapper
-
-    @_get_client
-    def s3_to_local(self, s3_filename: str) -> str:
-        local_path = self.get_local_path(s3_filename)
-        self.s3_client.download_file(self._s3_bucket, self.get_bucket_path(s3_filename), local_path)
-        log.info(f"Copied file from {self.get_uri_path(s3_filename)} to {local_path}")
-        return local_path
-
-    @_get_client
-    def local_to_s3(self, local_path: str) -> str:
-        s3_filename = local_path.rsplit("/", 1)[-1]
-        self.s3_client.upload_file(local_path, self._s3_bucketbucket, self.get_bucket_path(s3_filename))
-        log.info(f"Copied file from {local_path} to {self.get_uri_path(s3_filename)}")
-        return s3_filename
+from ala.namesmatching_service import Method, Param, Env
 
 @dag(
     dag_id="Validate-Namesmatching",
@@ -57,59 +13,35 @@ class FileManager:
 )
 def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_post_request: bool = True):
 
-    manager = FileManager()
-
-    def s3_process(s3_file_name: str, env: Env) -> str:
-        from ala.namesmatching_service import NamesMatching, Method, Param
-
-        method = Method.POST if use_post_request else Method.GET
-        mappings = {
-            Param.KINGDOM: "rawkingdom",
-            Param.PHYLUM: "rawphylum",
-            Param.CLASS: "rawclass",
-            Param.ORDER: "raworder",
-            Param.FAMILY: "rawfamily",
-            Param.GENUS: "rawgenus",
-            Param.S_EPITHET: "rawspecificepithet",
-            Param.I_EPITHET: "rawinfraspecificepithet",
-            Param.RANK: "rawtaxonrank",
-            Param.VERB_RANK: "verbatimtaxonrank",
-            Param.AUTHORSHIP: "rawscientificnameauthorship",
-            Param.SCI_NAME: "rawscientificname",
-            Param.VERN_NAME: "rawvernacularname",
-            Param.TAXON_ID: "rawtaxonid"
-        }
-
-        local_sample_path = manager.s3_to_local(s3_file_name)
-        local_processed_path = manager.get_local_path(f"{env.name.lower()}.csv")
-
-        nm = NamesMatching(env, method, 10)
-        nm.run_file(local_sample_path, local_processed_path, mappings, record_limit, chunk_size)
-        return manager.local_to_s3(local_processed_path)
-
     @task
     def build_sample() -> str:
         return "namesmatching-testdata-july2026.csv"
 
     @task.virtualenv(requirements=["pandas"])
-    def retrieve_test(s3_file_name: str) -> str:
-        return s3_process(s3_file_name, Env.TEST)
+    def retrieve(s3_manager_kwargs: dict[str, str], s3_output_path: str, sample_file: str, env: Env, method: Method, mappings: dict[Param, str], records: int, chunksize: int) -> str:
+        from ala.namesmatching_service import NamesMatching, S3FileManager
+
+        s3 = S3FileManager(**s3_manager_kwargs)
+        local_sample = s3.download(sample_file, "sample.csv")
+        processed = s3.local_path("processed.csv")
+
+        nm = NamesMatching(env, method, 10)
+        nm.run_file(local_sample, processed, mappings, records, chunksize)
+
+        return s3.upload(processed, f"{s3_output_path.rstrip('/')}/{env.name.lower()}_{records}.csv")
 
     @task.virtualenv(requirements=["pandas"])
-    def retrieve_prod(s3_file_name: str) -> str:
-        return s3_process(s3_file_name, Env.PROD)
-
-    @task.virtualenv(requirements=["pandas"])
-    def compare(prod_file: str, test_file: str):
+    def compare(s3_manager_kwargs: dict[str, str], s3_output_path: str, prod_file: str, test_file: str) -> None:
         import pandas as pd
-        
-        local_comparison_file = manager.get_local_path("comparison.csv")
-        local_diff_file = manager.get_local_path("diff.csv")
-        local_prod_path = manager.s3_to_local(prod_file)
-        local_test_path = manager.s3_to_local(test_file)
+        from ala.namesmatching_service import S3FileManager, RetParam
 
-        prod_df = pd.read_csv(local_prod_path, dtype=str)
-        test_df = pd.read_csv(local_test_path, dtype=str)
+        s3 = S3FileManager(**s3_manager_kwargs)
+
+        local_prod = s3.download(prod_file, "prod.csv")
+        local_test = s3.download(test_file, "test.csv")
+
+        prod_df = pd.read_csv(local_prod, dtype=str)
+        test_df = pd.read_csv(local_test, dtype=str)
         
         issues = pd.DataFrame()
         diffs = pd.DataFrame()
@@ -128,15 +60,17 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
         issues = issues.dropna(how="all", subset=issues.columns.difference([RetParam.PARAMS.value]))
 
         error_percent = 100 * len(issues) / len(prod_df)
-        log.info(f"Found {len(issues)} incorrect matches from {len(prod_df)} records ({error_percent:.02f}%)")
+        print(f"Found {len(issues)} incorrect matches from {len(prod_df)} records ({error_percent:.02f}%)")
 
         if issues.empty:
-            log.info(f"Output from test matches output from prod")
+            print(f"Output from test matches output from prod")
             return
 
         issues.index.name = "source_row"
-        issues.to_csv(local_comparison_file)
-        manager.local_to_s3(local_comparison_file)
+
+        local_comp = s3.local_path("comparison.csv")
+        issues.to_csv(local_comp)
+        s3.upload(local_comp, f"{s3_output_path.rstrip('/')}/comparison.csv")
 
         diff_list = []
         for column in diffs.columns:
@@ -151,12 +85,46 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
 
         global_totals = pd.DataFrame({"column": "OVERALL", "changes": "TOTAL", "count": len(issues), "percentage": f"{error_percent:.02f}%"}, index=[0])
         diffs = pd.concat([global_totals] + diff_list)
-        diffs.to_csv(local_diff_file)
-        manager.local_to_s3(local_diff_file)
+
+        local_diff = s3.local_path("diff.csv")
+        diffs.to_csv(local_diff)
+        s3.upload(local_diff, f"{s3_output_path.rstrip('/')}/diff.csv")
+
+    s3_bucket = "ala-databox-avro"
+    s3_base_path = "name-matching-reporting"
+    s3_output_path = f"testing/{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+    local_folder = "/tmp"
+
+    s3_manager_kwargs = {
+        "bucket": s3_bucket,
+        "base_path": s3_base_path,
+        "local_folder": local_folder
+    }
+
+    method = Method.POST if use_post_request else Method.GET
+    mappings = {
+        Param.KINGDOM: "rawkingdom",
+        Param.PHYLUM: "rawphylum",
+        Param.CLASS: "rawclass",
+        Param.ORDER: "raworder",
+        Param.FAMILY: "rawfamily",
+        Param.GENUS: "rawgenus",
+        Param.S_EPITHET: "rawspecificepithet",
+        Param.I_EPITHET: "rawinfraspecificepithet",
+        Param.RANK: "rawtaxonrank",
+        Param.VERB_RANK: "verbatimtaxonrank",
+        Param.AUTHORSHIP: "rawscientificnameauthorship",
+        Param.SCI_NAME: "rawscientificname",
+        Param.VERN_NAME: "rawvernacularname",
+        Param.TAXON_ID: "rawtaxonid"
+    }
 
     sample_file = build_sample()
-    test_file = retrieve_test(sample_file)
-    prod_file = retrieve_prod(sample_file)
-    compare(prod_file, test_file)
+
+    outputs = {}
+    for env in (Env.PROD, Env.TEST):
+        outputs[env.name.lower()] = retrieve.override(task_id=f"retrieve_{env.name.lower()}")(s3_manager_kwargs, s3_output_path, sample_file, env, method, mappings, record_limit, chunk_size)
+
+    compare(s3_manager_kwargs, s3_output_path, outputs[Env.PROD.name.lower()], outputs[Env.TEST.name.lower()])
 
 validate_namesmatching()
