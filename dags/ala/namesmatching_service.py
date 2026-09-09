@@ -169,11 +169,7 @@ class NamesMatching:
 
     def process_df(self, df: pd.DataFrame, mappings: dict[Param, str] = {}) -> pd.DataFrame:
         df = df.rename(columns={value: key.value for key, value in mappings.items()})
-
-        response_df = self.run_df(df)
-        df = df.merge(response_df, "left", left_index=True, right_index=True)
-
-        return df.rename(columns={key.value: value for key, value in mappings.items()})
+        return self.run_df(df).sort_index()
 
     def run_file(self, input_path: Path, output_path: Path, mappings: dict[Param, str] = {}, rows: int = 0, chunksize: int = 0) -> None:
         records_name = "all" if not rows else str(rows)

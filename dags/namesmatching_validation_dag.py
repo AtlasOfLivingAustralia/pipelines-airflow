@@ -3,9 +3,8 @@ from datetime import timedelta
 from airflow.decorators import dag, task
 from airflow.exceptions import AirflowException
 from ala.ala_helper import get_default_args
-from ala.namesmatching_service import NamesMatching, Method, Env, Param, RetParam
 import boto3
-import pandas as pd
+from ala.namesmatching_service import Env
 
 class FileManager:
 
@@ -61,6 +60,8 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
     manager = FileManager()
 
     def s3_process(s3_file_name: str, env: Env) -> str:
+        from ala.namesmatching_service import NamesMatching, Method, Param
+
         method = Method.POST if use_post_request else Method.GET
         mappings = {
             Param.KINGDOM: "rawkingdom",
@@ -90,26 +91,25 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
     def build_sample() -> str:
         return "namesmatching-testdata-july2026.csv"
 
-    @task
+    @task.virtualenv(requirements=["pandas"])
     def retrieve_test(s3_file_name: str) -> str:
         return s3_process(s3_file_name, Env.TEST)
 
-    @task
+    @task.virtualenv(requirements=["pandas"])
     def retrieve_prod(s3_file_name: str) -> str:
         return s3_process(s3_file_name, Env.PROD)
 
-    @task
+    @task.virtualenv(requirements=["pandas"])
     def compare(prod_file: str, test_file: str):
+        import pandas as pd
+        
         local_comparison_file = manager.get_local_path("comparison.csv")
         local_diff_file = manager.get_local_path("diff.csv")
         local_prod_path = manager.s3_to_local(prod_file)
         local_test_path = manager.s3_to_local(test_file)
 
-        nm = NamesMatching() # Env doesn't matter here, not being used to run tests
-        test_cols = nm.get_prefixed_param_names() + [RetParam.PARAMS.value]
-
-        prod_df = pd.read_csv(local_prod_path, dtype=str, usecols=test_cols)
-        test_df = pd.read_csv(local_test_path, dtype=str, usecols=test_cols)
+        prod_df = pd.read_csv(local_prod_path, dtype=str)
+        test_df = pd.read_csv(local_test_path, dtype=str)
         
         issues = pd.DataFrame()
         diffs = pd.DataFrame()
