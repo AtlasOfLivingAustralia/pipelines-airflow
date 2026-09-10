@@ -208,7 +208,7 @@ class NamesMatching:
 
         print(f"Generated file {output_path}")
 
-class S3FileManager:
+class FileManager:
 
     def __init__(self, bucket: str, base_path: str = "", local_folder: str = ""):
         self._bucket = bucket
@@ -225,6 +225,13 @@ class S3FileManager:
 
     def local_path(self, file_path: str) -> Path:
         return Path(f"{self._local_folder}/{file_path.strip('/')}")
+
+    @staticmethod
+    def delete_paths(*paths: Path) -> None:
+        for path in paths:
+            if path.exists():
+                path.unlink()
+                print(f"Cleaned up file: {path}")
 
     @staticmethod
     def _get_client(func) -> callable:
