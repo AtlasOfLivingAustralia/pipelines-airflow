@@ -37,11 +37,11 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
 
         s3 = S3FileManager(**s3_manager_kwargs)
 
-        local_prod = s3.download(prod_file, "prod.csv")
-        local_test = s3.download(test_file, "test.csv")
+        prod_path = s3.download(prod_file, "prod.csv")
+        test_path = s3.download(test_file, "test.csv")
 
-        prod_df = pd.read_csv(local_prod, dtype=str)
-        test_df = pd.read_csv(local_test, dtype=str)
+        prod_df = pd.read_csv(prod_path, dtype=str)
+        test_df = pd.read_csv(test_path, dtype=str)
         
         issues = pd.DataFrame()
         diffs = pd.DataFrame()
@@ -68,9 +68,10 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
 
         issues.index.name = "source_row"
 
-        local_comp = s3.local_path("comparison.csv")
-        issues.to_csv(local_comp)
-        s3.upload(local_comp, f"{s3_output_path.rstrip('/')}/comparison.csv")
+        comp_path = s3.local_path("comparison.csv")
+        issues.to_csv(comp_path)
+        s3.upload(comp_path, f"{s3_output_path.rstrip('/')}/comparison.csv")
+        comp_path.unlink()
 
         diff_list = []
         for column in diffs.columns:
@@ -86,9 +87,10 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
         global_totals = pd.DataFrame({"column": "OVERALL", "changes": "TOTAL", "count": len(issues), "percentage": f"{error_percent:.02f}%"}, index=[0])
         diffs = pd.concat([global_totals] + diff_list)
 
-        local_diff = s3.local_path("diff.csv")
-        diffs.to_csv(local_diff)
-        s3.upload(local_diff, f"{s3_output_path.rstrip('/')}/diff.csv")
+        diff_path = s3.local_path("diff.csv")
+        diffs.to_csv(diff_path)
+        s3.upload(diff_path, f"{s3_output_path.rstrip('/')}/diff.csv")
+        diff_path.unlink()
 
     s3_bucket = "ala-databox-avro"
     s3_base_path = "name-matching-reporting"

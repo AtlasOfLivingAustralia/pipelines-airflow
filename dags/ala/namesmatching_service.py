@@ -217,14 +217,14 @@ class S3FileManager:
 
         self.s3_client = None
 
-    def bucket_path(self, object_path: str) -> str:
+    def bucket_loc(self, object_path: str) -> str:
         return f"{self._s3_base_path}/{object_path.strip('/')}"
 
-    def uri_path(self, object_path: str) -> str:
+    def object_uri(self, object_path: str) -> str:
         return f"s3://{self._bucket}/{self._s3_base_path}/{object_path.strip('/')}"
 
-    def local_path(self, file_path: str) -> str:
-        return f"{self._local_folder}/{file_path.strip('/')}"
+    def local_path(self, file_path: str) -> Path:
+        return Path(f"{self._local_folder}/{file_path.strip('/')}")
 
     @staticmethod
     def _get_client(func) -> callable:
@@ -236,17 +236,19 @@ class S3FileManager:
         return wrapper
 
     @_get_client
-    def download(self, s3_path: str, local_path: str = "") -> str:
+    def download(self, s3_path: str, local_path: str = "") -> Path:
         local_path = self.local_path(local_path or s3_path)
-        self.s3_client.download_file(self._bucket, self.bucket_path(s3_path), self.local_path(local_path))
-        print(f"Copied file from {self.uri_path(s3_path)} to {local_path}")
+        print(f"Copying file from {self.object_uri(s3_path)} to {local_path}")
+        self.s3_client.download_file(self._bucket, self.bucket_loc(s3_path), local_path)
         return local_path
 
     @_get_client
     def upload(self, local_path: str, s3_path: str = "") -> str:
-        s3_path = s3_path or local_path
-        self.s3_client.upload_file(local_path, self._bucket, self.bucket_path(s3_path))
-        print(f"Copied file from {local_path} to {self.uri_path(s3_path)}")
+        if not s3_path:
+            s3_path = local_path[len(self._local_folder):] if local_path.startswith(self._local_folder) else local_path 
+
+        print(f"Copying file from {local_path} to {self.object_uri(s3_path)}")
+        self.s3_client.upload_file(local_path, self._bucket, self.bucket_loc(s3_path))
         return s3_path
 
 class TimeKeeper:
