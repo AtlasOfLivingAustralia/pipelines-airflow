@@ -210,10 +210,13 @@ class NamesMatching:
 
 class FileManager:
 
-    def __init__(self, bucket: str, base_path: str = "", local_folder: str = ""):
+    def __init__(self, bucket: str, base_path: str = "", local_folder: str = "/"):
         self._bucket = bucket
         self._s3_base_path = base_path.rstrip("/")
-        self._local_folder = local_folder.rstrip("/")
+        self._local_folder = Path(local_folder)
+        
+        if not self._local_folder.exists():
+            self._local_folder.mkdir()
 
         self.s3_client = None
 
@@ -224,7 +227,7 @@ class FileManager:
         return f"s3://{self._bucket}/{self._s3_base_path}/{object_path.strip('/')}"
 
     def local_path(self, file_path: str) -> Path:
-        return Path(f"{self._local_folder}/{file_path.strip('/')}")
+        return self._local_folder / file_path
 
     @staticmethod
     def delete_paths(*paths: Path) -> None:
@@ -232,6 +235,22 @@ class FileManager:
             if path.exists():
                 path.unlink()
                 print(f"Cleaned up file: {path}")
+
+    @staticmethod
+    def delete_last_path(path: Path) -> None:
+        if not path.exists():
+            return
+
+        other: list[str] = []
+        for item in path.parent.iterdir():
+            if item != path:
+                other.append(str(item))
+
+        if other:
+            print(f"Unable to delete {path}, other items exist in dir ({', '.join(other)})")
+            return
+
+        FileManager.delete_paths(path)
 
     @staticmethod
     def _get_client(func) -> callable:
@@ -243,16 +262,18 @@ class FileManager:
         return wrapper
 
     @_get_client
-    def download(self, s3_path: str, local_path: str = "") -> Path:
-        local_path = self.local_path(local_path or s3_path)
+    def download(self, s3_path: str, local_path: Path = None) -> Path:
+        if local_path is None:
+            local_path = self.local_path(s3_path)
+
         print(f"Copying file from {self.object_uri(s3_path)} to {local_path}")
         self.s3_client.download_file(self._bucket, self.bucket_loc(s3_path), local_path)
         return local_path
 
     @_get_client
-    def upload(self, local_path: str, s3_path: str = "") -> str:
+    def upload(self, local_path: Path, s3_path: str = "") -> str:
         if not s3_path:
-            s3_path = local_path[len(self._local_folder):] if local_path.startswith(self._local_folder) else local_path 
+            s3_path = str(local_path.relative_to(local_path.parents[-2]))
 
         print(f"Copying file from {local_path} to {self.object_uri(s3_path)}")
         self.s3_client.upload_file(local_path, self._bucket, self.bucket_loc(s3_path))
