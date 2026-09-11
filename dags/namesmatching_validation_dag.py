@@ -22,14 +22,15 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
         from ala.namesmatching_service import NamesMatching, FileManager
 
         fm = FileManager(**fm_kwargs)
-        sample_path = fm.download(sample_file, "sample.csv")
+        sample_path = fm.download(sample_file, fm.local_path("sample.csv"))
         processed_path = fm.local_path("processed.csv")
 
         nm = NamesMatching(env, method, 10)
         nm.run_file(sample_path, processed_path, mappings, records, chunksize)
 
         uploaded = fm.upload(processed_path, f"{s3_output_path.rstrip('/')}/{env.name.lower()}_{records}.csv")
-        fm.delete_paths(sample_path, processed_path)
+        fm.delete_paths(processed_path)
+        fm.delete_last_path(sample_path)
 
         return uploaded
 
@@ -40,8 +41,8 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
 
         fm = FileManager(**fm_kwargs)
 
-        prod_path = fm.download(prod_file, "prod.csv")
-        test_path = fm.download(test_file, "test.csv")
+        prod_path = fm.download(prod_file, fm.local_path("prod.csv"))
+        test_path = fm.download(test_file, fm.local_path("test.csv"))
 
         prod_df = pd.read_csv(prod_path, dtype=str)
         test_df = pd.read_csv(test_path, dtype=str)
@@ -104,7 +105,7 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, use_
     s3_bucket = "ala-databox-avro"
     s3_base_path = "name-matching-reporting"
     s3_output_path = f"testing/{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-    local_folder = "/tmp"
+    local_folder = "/tmp/namesmatching"
 
     fm_kwargs = {
         "bucket": s3_bucket,
