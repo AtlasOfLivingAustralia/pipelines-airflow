@@ -9,8 +9,6 @@ import concurrent.futures as cf
 from enum import Enum
 from pathlib import Path
 import time
-from datetime import datetime
-import boto3
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -83,40 +81,54 @@ class NamesMatching:
     )
 
     _default_prefix = "returned"
-    endpoint = "api/searchByClassification"
+    _endpoint = "api/searchByClassification"
 
-    def __init__(self, env: Env = Env.TEST, method: Method = Method.POST, max_workers: int = 10, prefix: str = ""):
-        self.env = env
-        self.method = method
-        self.max_workers = max_workers
-        self.prefix = prefix or self._default_prefix
+    def __init__(self, env: Env = None, method: Method = None, max_workers: int = 10, prefix: str = ""):
+        self._env = env
+        self._method = method
+        self._max_workers = max_workers
+        self._prefix = prefix or self._default_prefix
 
-        self.url = urljoin(env.value, self.endpoint)
-        self.session: requests.Session = None
+        self._url: str = None
+        self._session: requests.Session = None
 
     def get_returned_name(self, param: RetParam) -> str:
         return self._apply_prefix(param.value)
 
     def get_prefixed_param_names(self) -> list[str]:
-        return [self._prefix(item.value) for item in RetParam if item.value not in self._exclude_prefix]
+        return [self._get_prefix(item.value) for item in RetParam if item.value not in self._exclude_prefix]
 
-    def _prefix(self, value: str) -> str:
-        return f"{self.prefix}_{value}"
+    def _get_prefix(self, value: str) -> str:
+        return f"{self._prefix}_{value}"
 
     def _apply_prefix(self, key: str) -> str:
-        return self._prefix(key) if self.prefix and key not in self._exclude_prefix else key
+        return self._get_prefix(key) if self._prefix and key not in self._exclude_prefix else key
         
     @staticmethod
-    def start_session(func) -> callable:
+    def start_session(func: callable) -> callable:
         def wrapper(self, *args, **kwargs) -> any:
-            if self.session is None:
+            if self._session is None:
                 session = requests.Session()
                 session.headers.update({"accept": "application/json", "User-Agent": "ala-names-matching-test/0.1"})
                 retry_settings = Retry(total=5, backoff_factor=0.2)
                 adapter = HTTPAdapter(pool_connections=self.max_workers, pool_maxsize=self.max_workers, max_retries=retry_settings)
                 session.mount("https://", adapter)
 
-                self.session = session
+                self._session = session
+
+            return func(self, *args, **kwargs)
+        return wrapper
+
+    @staticmethod
+    def update_args(func: callable) -> callable:
+        def wrapper(self, *args, **kwargs) -> any:
+            self._env = kwargs.pop("env", self._env)
+            assert isinstance(self._env, Env), f"Invalid environment '{self._env}', should be Env Enum."
+
+            self._method = kwargs.pop("method", self._method)
+            assert isinstance(self._method, Method), f"Invalid method '{self._method}', should be Method Enum."
+
+            self._url = urljoin(self._env.value, self._endpoint)
 
             return func(self, *args, **kwargs)
         return wrapper
@@ -125,12 +137,12 @@ class NamesMatching:
         # Set retrieve method info and index value
         ret_val = {
             RetParam._IDX.value: idx,
-            RetParam.METHOD.value: self.method.value.lower(),
+            RetParam.METHOD.value: self._method.value.lower(),
             RetParam.PARAMS.value: params
         }
 
         # Post parameters and check repsonse
-        response = self.session.post(self.url, json=params) if self.method == Method.POST else self.session.get(self.url, params=params)
+        response = self._session.post(self.url, json=params) if self.method == Method.POST else self._session.get(self.url, params=params)
         if response.status_code != 200:
             return ret_val | {RetParam.SUCCESS.value: False, RetParam.ISSUES.value: [f"{response.status_code} ({response.reason}): {response.json()['message']}"]}
 
@@ -149,13 +161,15 @@ class NamesMatching:
 
         # Prefix keys if required
         return ret_val | {self._apply_prefix(key): value for key, value in data.items()}
-    
+
+    @update_args
     @start_session
     def run_single(self, params: dict[str, str]) -> dict:
         ret_val = self._collect(params)
         ret_val.pop(RetParam._IDX.value)
         return ret_val
 
+    @update_args
     @start_session
     def run_series(self, series: pd.Series) -> pd.DataFrame:
         import pandas as pd
@@ -170,15 +184,18 @@ class NamesMatching:
 
         return pd.DataFrame.from_records(records, index=RetParam._IDX.value).convert_dtypes()
 
+    @update_args
     def run_df(self, df: pd.DataFrame) -> pd.DataFrame:
         valid_df_columns = df.columns.intersection([item.value for item in Param])
         param_series = df[valid_df_columns].apply(lambda row: {k: v for k, v in row.dropna().items() if v != ""}, axis=1)
         return self.run_series(param_series)
 
+    @update_args
     def process_df(self, df: pd.DataFrame, mappings: dict[Param, str] = {}) -> pd.DataFrame:
         df = df.rename(columns={value: key.value for key, value in mappings.items()})
         return self.run_df(df).sort_index()
 
+    @update_args
     def run_file(self, input_path: Path, output_path: Path, mappings: dict[Param, str] = {}, rows: int = 0, chunksize: int = 0) -> None:
         import pandas as pd
 
@@ -192,9 +209,9 @@ class NamesMatching:
 
         print(f"Running name matching in '{self.env.name.lower()}' on {records_name} records using {self.method.name} method with {self.max_workers} workers")
 
-        total_timer = TimeKeeper()
+        total_timer = _TimeKeeper()
         for idx, df in enumerate(pd.read_csv(input_path, **read_kwargs), start=1):
-            chunk_timer = TimeKeeper()
+            chunk_timer = _TimeKeeper()
             df = self.process_df(df, mappings)
 
             # Reorder columns to align properly on subsequent writes
@@ -208,78 +225,7 @@ class NamesMatching:
 
         print(f"Generated file {output_path}")
 
-class FileManager:
-
-    def __init__(self, bucket: str, base_path: str = "", local_folder: str = "/"):
-        self._bucket = bucket
-        self._s3_base_path = base_path.rstrip("/")
-        self._local_folder = Path(local_folder)
-        
-        if not self._local_folder.exists():
-            self._local_folder.mkdir()
-
-        self.s3_client = None
-
-    def bucket_loc(self, object_path: str) -> str:
-        return f"{self._s3_base_path}/{object_path.strip('/')}"
-
-    def object_uri(self, object_path: str) -> str:
-        return f"s3://{self._bucket}/{self._s3_base_path}/{object_path.strip('/')}"
-
-    def local_path(self, file_path: str) -> Path:
-        return self._local_folder / file_path
-
-    @staticmethod
-    def delete_paths(*paths: Path) -> None:
-        for path in paths:
-            if path.exists():
-                path.unlink()
-                print(f"Cleaned up file: {path}")
-
-    @staticmethod
-    def delete_last_path(path: Path) -> None:
-        if not path.exists():
-            return
-
-        other: list[str] = []
-        for item in path.parent.iterdir():
-            if item != path:
-                other.append(str(item))
-
-        if other:
-            print(f"Unable to delete {path}, other items exist in dir ({', '.join(other)})")
-            return
-
-        FileManager.delete_paths(path)
-
-    @staticmethod
-    def _get_client(func) -> callable:
-        def wrapper(self, *args, **kwargs) -> any:
-            if self.s3_client is None:
-                self.s3_client = boto3.client("s3")
-
-            return func(self, *args, **kwargs)
-        return wrapper
-
-    @_get_client
-    def download(self, s3_path: str, local_path: Path = None) -> Path:
-        if local_path is None:
-            local_path = self.local_path(s3_path)
-
-        print(f"Copying file from {self.object_uri(s3_path)} to {local_path}")
-        self.s3_client.download_file(self._bucket, self.bucket_loc(s3_path), local_path)
-        return local_path
-
-    @_get_client
-    def upload(self, local_path: Path, s3_path: str = "") -> str:
-        if not s3_path:
-            s3_path = str(local_path.relative_to(local_path.parents[-2]))
-
-        print(f"Copying file from {local_path} to {self.object_uri(s3_path)}")
-        self.s3_client.upload_file(local_path, self._bucket, self.bucket_loc(s3_path))
-        return s3_path
-
-class TimeKeeper:
+class _TimeKeeper:
     def __init__(self):
         self.start_time = time.perf_counter_ns()
 
