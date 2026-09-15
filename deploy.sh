@@ -14,8 +14,8 @@ TS=$(date +%Y%m%d-%H%M%S)
 
 # Check if preingestion directory exists in the bucket
 if aws s3 ls "s3://$S3_BUCKET/airflow/dags/" > /dev/null 2>&1; then
-  echo "Renaming existing airflow/dag directory to airflow/dag_$TS ..."
-  aws s3 mv "s3://$S3_BUCKET/airflow/dags/" "s3://$S3_BUCKET/airflow/dags_$TS/" --recursive
+  echo "Renaming existing airflow/dag directory to airflow/backup/dag_$TS ..."
+  aws s3 mv "s3://$S3_BUCKET/airflow/dags/" "s3://$S3_BUCKET/airflow/backup/dags_$TS/" --recursive
 fi
 
 echo "Copying local dags directory to s3://$S3_BUCKET/airflow/dags/ ..."

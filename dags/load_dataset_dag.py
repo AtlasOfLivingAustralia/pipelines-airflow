@@ -1,26 +1,25 @@
+import json
 import os
+from datetime import timedelta
+from distutils.util import strtobool
 from urllib.error import URLError
 
 import boto3
 from airflow import DAG
-from airflow.exceptions import AirflowSkipException, AirflowException
+from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.dates import days_ago
-from datetime import timedelta
-import json
-from distutils.util import strtobool
 from airflow.utils.trigger_rule import TriggerRule
-from botocore.exceptions import ClientError
-
 from ala import ala_config
 from ala.ala_helper import (
-    get_default_args,
-    get_success_notification_operator,
-    get_metadata_as_json,
     download_file_with_retry,
     get_datasets_sizing,
+    get_default_args,
+    get_metadata_as_json,
+    get_success_notification_operator,
 )
+from botocore.exceptions import ClientError
 
 load_images = "{{ dag_run.conf['load_images'] }}"
 override_uuid_percentage_check = "{{ dag_run.conf['override_uuid_percentage_check'] }}"
@@ -74,7 +73,7 @@ with DAG(
 
         dataset_uid = kwargs["dag_run"].conf["datasetIds"]
 
-        data_resource_content = get_metadata_as_json(registry_url, dataset_uid, ala_api_key)
+        data_resource_content = get_metadata_as_json(dataset_uid)
 
         conn_params_debug = json.dumps(data_resource_content["connectionParameters"])
 
