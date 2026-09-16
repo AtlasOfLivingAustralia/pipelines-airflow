@@ -83,10 +83,11 @@ class NamesMatching:
     _default_prefix = "returned"
     _endpoint = "api/searchByClassification"
 
-    def __init__(self, env: Env = None, method: Method = None, max_workers: int = 10, prefix: str = ""):
+    def __init__(self, env: Env = None, method: Method = None, max_workers: int = 10, headers: dict = None, prefix: str = ""):
         self._env = env
         self._method = method
         self._max_workers = max_workers
+        self._headers = headers or {}
         self._prefix = prefix or self._default_prefix
 
         self._url: str = None
@@ -109,9 +110,9 @@ class NamesMatching:
         def wrapper(self, *args, **kwargs) -> any:
             if self._session is None:
                 session = requests.Session()
-                session.headers.update({"accept": "application/json", "User-Agent": "ala-names-matching-test/0.1"})
+                session.headers.update({"accept": "application/json"} | self._headers)
                 retry_settings = Retry(total=5, backoff_factor=0.2)
-                adapter = HTTPAdapter(pool_connections=self.max_workers, pool_maxsize=self.max_workers, max_retries=retry_settings)
+                adapter = HTTPAdapter(pool_connections=self._max_workers, pool_maxsize=self._max_workers, max_retries=retry_settings)
                 session.mount("https://", adapter)
 
                 self._session = session
@@ -142,7 +143,7 @@ class NamesMatching:
         }
 
         # Post parameters and check repsonse
-        response = self._session.post(self.url, json=params) if self.method == Method.POST else self._session.get(self.url, params=params)
+        response = self._session.post(self._url, json=params) if self._method == Method.POST else self._session.get(self.url, params=params)
         if response.status_code != 200:
             return ret_val | {RetParam.SUCCESS.value: False, RetParam.ISSUES.value: [f"{response.status_code} ({response.reason}): {response.json()['message']}"]}
 
@@ -176,7 +177,7 @@ class NamesMatching:
 
         records = []
 
-        with cf.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        with cf.ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = (executor.submit(self._collect, params, idx) for idx, params in series.items())
 
             for future in cf.as_completed(futures):
@@ -207,7 +208,7 @@ class NamesMatching:
             "iterator": chunksize == 0
         }
 
-        print(f"Running name matching in '{self.env.name.lower()}' on {records_name} records using {self.method.name} method with {self.max_workers} workers")
+        print(f"Running name matching in '{self._env.name.lower()}' on {records_name} records using {self._method.name} method with {self._max_workers} workers")
 
         total_timer = _TimeKeeper()
         for idx, df in enumerate(pd.read_csv(input_path, **read_kwargs), start=1):

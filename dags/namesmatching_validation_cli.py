@@ -61,20 +61,16 @@ class FileManager:
                 print(f"Cleaned up file: {path}")
 
     @staticmethod
-    def delete_last_path(path: Path) -> None:
-        if not path.exists():
-            return
+    def clear_folder(folder_path: Path, delete_folder: bool = False) -> None:
+        for item in folder_path.iterdir():
+            if item.is_file():
+                FileManager.delete_paths(item)
+            else:
+                FileManager.clear_folder(item, True)
 
-        other: list[str] = []
-        for item in path.parent.iterdir():
-            if item != path:
-                other.append(str(item))
-
-        if other:
-            print(f"Unable to delete {path}, other items exist in dir ({', '.join(other)})")
-            return
-
-        FileManager.delete_paths(path)
+        if delete_folder:
+            print(f"Cleaned up folder: {folder_path}")
+            folder_path.rmdir()
 
     @staticmethod
     def _get_client(func) -> callable:
@@ -84,6 +80,11 @@ class FileManager:
 
             return func(self, *args, **kwargs)
         return wrapper
+
+    @_get_client
+    def list_objects(self, object_path: str) -> list[str]:
+        content = self.s3_client.list_objects_v2(Bucket=s3_bucket, Prefix=self.bucket_loc(object_path))
+        return [item["Key"].split(object_path)[-1].strip("/") for item in content["Contents"]]
 
     @_get_client
     def download(self, s3_path: str, local_path: Path, overwrite: bool = True) -> Path:
@@ -105,23 +106,62 @@ class FileManager:
 
         return s3_path
 
-def retrieve(local_folder: Path, s3_sample: str, env: Env, method: Method, workers: int, records: int, chunksize: int) -> str: 
-    fm = FileManager(local_folder)
-    nm = NamesMatching(env, method, workers)
+def retrieve(local_folder: Path, s3_sample: str, env: Env, method: Method, workers: int, records: int, chunksize: int, headers: dict = {}, use_prev: bool = False) -> tuple[Path, str]: 
 
+    def most_recent(file_names: list[str]) -> str:
+        last = ""
+        last_time = None
+        for file_name in file_names:
+            name, suffix = file_name.rsplit(".", 1)
+            if suffix != "csv":
+                continue
+
+            date, time, _, entries = name.split("_")
+            entries = int(entries)
+
+            if entries < records:
+                continue
+
+            timestamp = datetime.fromisoformat(f"{date}_{time}")
+            if (not last) or (timestamp > last_time):
+                last = file_name
+                last_time = timestamp
+
+        return last
+
+    fm = FileManager(local_folder)
     env_str = env.name.lower()
+    s3_folder = fm.join_path_parts(s3_output_dir, env_str)
+
+    if use_prev:
+        last = most_recent(fm.list_objects(s3_folder))
+        if last:
+            print(f"Using most recent file in s3 {last}")
+            return fm.local_path(last), last
+
+        print(f"No suitable file found in {s3_folder}, generating file")
+
+    nm = NamesMatching(env, method, workers, headers)
 
     sample_file = fm.download(s3_sample, fm.local_path("sample.csv"), overwrite=False)
     output_file = fm.local_path(f"{fm.timestamp()}_{env_str}_{records}.csv")
     
     nm.run_file(sample_file, output_file, mappings, records, chunksize)
-    return fm.upload(output_file, fm.join_path_parts(s3_output_dir, env_str, output_file.name), True)
+    return output_file, fm.upload(output_file, fm.join_path_parts(s3_output_dir, env_str, output_file.name))
 
-def compare(local_folder: Path, s3_source: str, s3_compare: str) -> tuple[str, str]:
+def compare(local_folder: Path, local_source: Path, s3_source: str, local_compare: Path, s3_compare: str) -> tuple[str, str]:
     fm = FileManager(local_folder)
 
-    source_path = fm.download(s3_source, s3_source.rsplit("/", 1)[-1], False)
-    compare_path = fm.download(s3_compare, s3_compare.rsplit("/", 1)[-1], False)
+    def get_s3(type: str, local: Path, s3: str) -> Path:
+        if not local.exists():
+            return fm.download(s3, local.name)
+
+        print(f"Local file for {s3} already exists at {local}, using as {type} file")
+        return local
+
+    source_path = get_s3("source", local_source, s3_source)
+    compare_path = get_s3("compare", local_compare, s3_compare)
+
     source_df = pd.read_csv(source_path, dtype=str)
     compare_df = pd.read_csv(compare_path, dtype=str)
 
@@ -169,10 +209,10 @@ def compare(local_folder: Path, s3_source: str, s3_compare: str) -> tuple[str, s
     diffs_path = fm.local_path(f"{fm.timestamp()}_diffs.csv")
     diffs.to_csv(diffs_path, index=False)
 
-    return (fm.upload(issues_path, fm.join_path_parts(s3_output_dir, "comparison", s3_folder, issues_path.name), True),
-            fm.upload(diffs_path, fm.join_path_parts(s3_output_dir, "comparison", s3_folder, diffs_path.name), True))
+    fm.upload(issues_path, fm.join_path_parts(s3_output_dir, "comparison", s3_folder, issues_path.name))
+    fm.upload(diffs_path, fm.join_path_parts(s3_output_dir, "comparison", s3_folder, diffs_path.name))
 
-def main(records: int, chunksize: int, workers: int, use_get: bool) -> None:
+def main(records: int, chunksize: int, workers: int, use_get: bool, use_prod: bool, use_test: bool) -> None:
     if workers < 1:
         print("Clamping workers to minimum value of 1")
         workers = 1
@@ -191,13 +231,13 @@ def main(records: int, chunksize: int, workers: int, use_get: bool) -> None:
     s3_file = "namesmatching-testdata-july2026.csv"
     
     # Get prod results
-    s3_prod = retrieve(data_folder, s3_file, Env.PROD, method, workers, records, chunksize)
+    local_prod, s3_prod = retrieve(data_folder, s3_file, Env.PROD, method, workers, records, chunksize, use_prod)
 
     # Get test results
-    s3_test = retrieve(data_folder, s3_file, Env.TEST, method, workers, records, chunksize)
+    local_test, s3_test = retrieve(data_folder, s3_file, Env.TEST, method, workers, records, chunksize, use_test)
 
     # Compare test and prod
-    compare(data_folder, s3_prod, s3_test)
+    compare(data_folder, local_prod, s3_prod, local_test, s3_test)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate namesmatching in test with prod")
@@ -205,6 +245,8 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--chunksize", type=int, default=100000, help="Chunksize to process in (default: %(default)s)")
     parser.add_argument("-w", "--workers", type=int, default=10, help="Amount of workers to run against names matching (default: %(default)s)")
     parser.add_argument("-g", "--useget", action="store_true", help="Use GET method for testing instead of default POST method")
+    parser.add_argument("-p", "--useprod", action="store_true", help="Use latest prod file with sufficient records instead of generating")
+    parser.add_argument("-t", "--usetest", action="store_true", help="Usel latest test file with sufficient records instead og generating")
     args = parser.parse_args()
 
-    main(args.workers, args.records, args.chunksize, args.useget)
+    main(args.records, args.chunksize, args.workers, args.useget, args.useprod, args.usetest)
