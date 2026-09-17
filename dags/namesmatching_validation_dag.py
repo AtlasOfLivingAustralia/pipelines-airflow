@@ -18,16 +18,16 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
     def build_sample() -> str:
         return "namesmatching-testdata-july2026.csv"
 
-    @task.virtualenv(requirements=["pandas"])
-    def retrieve(local_folder: Path, sample_file: str, env: Env, method: Method, workers: int, records: int, chunksize: int, use_latest: bool) -> tuple[Path, str]:
+    @task.virtualenv(requirements=["pandas"], multiple_outputs=False)
+    def retrieve(local_folder: Path, sample_file: str, env: Env, method: Method, workers: int, records: int, chunksize: int, use_latest: bool) -> dict[str, str]:
         import namesmatching_validation_cli as nmcli
         headers = {"User-Agent": "ala-names-matching-test/0.1"}
         return nmcli.retrieve(local_folder, sample_file, env, method, workers, records, chunksize, headers, use_latest)
 
     @task.virtualenv(requirements=["pandas"])
-    def compare(local_folder: Path, local_prod: Path, s3_prod: str, local_test: Path, s3_test: str) -> tuple[str, str]:
+    def compare(local_folder: Path, prod_info: dict[str, str], test_info: dict[str, str]) -> None:
         import namesmatching_validation_cli as nmcli
-        return nmcli.compare(local_folder, local_prod, s3_prod, local_test, s3_test)
+        nmcli.compare(local_folder, prod_info, test_info)
 
     @task.virtualenv(requirements=["pandas"])
     def cleanup(local_folder: Path) -> None:
@@ -38,9 +38,8 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
     method = Method.POST if use_post_request else Method.GET
 
     sample_file = build_sample()
-    prod_local, prod_s3 = retrieve.override(task_id=f"retrieve_prod")(local_folder, sample_file, Env.PROD, method, api_workers, record_limit, chunk_size, use_latest_prod)
-    test_local, test_s3 = retrieve.override(task_id=f"retrieve_test")(local_folder, sample_file, Env.TEST, method, api_workers, record_limit, chunk_size, use_latest_test)
-    compare(local_folder, prod_local, prod_s3, test_local, test_s3)
-    cleanup(local_folder)
+    prod_outputs = retrieve.override(task_id=f"retrieve_prod")(local_folder, sample_file, Env.PROD, method, api_workers, record_limit, chunk_size, use_latest_prod)
+    test_outputs = retrieve.override(task_id=f"retrieve_test")(local_folder, sample_file, Env.TEST, method, api_workers, record_limit, chunk_size, use_latest_test)
+    compare(local_folder, prod_outputs, test_outputs) >> cleanup(local_folder)
 
 validate_namesmatching()

@@ -9,6 +9,9 @@ s3_bucket = "ala-databox-avro"
 s3_base_path = "name-matching-reporting"
 s3_output_dir = "testing"
 
+path_key = "path"
+s3_key = "s3"
+
 mappings = {
     Param.KINGDOM: "rawkingdom",
     Param.PHYLUM: "rawphylum",
@@ -106,7 +109,7 @@ class FileManager:
 
         return s3_path
 
-def retrieve(local_folder: Path, s3_sample: str, env: Env, method: Method, workers: int, records: int, chunksize: int, headers: dict = {}, use_prev: bool = False) -> tuple[Path, str]: 
+def retrieve(local_folder: Path, s3_sample: str, env: Env, method: Method, workers: int, records: int, chunksize: int, headers: dict = {}, use_prev: bool = False) -> dict[str, str]: 
 
     def most_recent(file_names: list[str]) -> str:
         last = ""
@@ -137,7 +140,10 @@ def retrieve(local_folder: Path, s3_sample: str, env: Env, method: Method, worke
         last = most_recent(fm.list_objects(s3_folder))
         if last:
             print(f"Using most recent file in s3 {last}")
-            return fm.local_path(last), last
+            return {
+                path_key: str(fm.local_path(last)),
+                s3_key: last
+            }
 
         print(f"No suitable file found in {s3_folder}, generating file")
 
@@ -147,20 +153,26 @@ def retrieve(local_folder: Path, s3_sample: str, env: Env, method: Method, worke
     output_file = fm.local_path(f"{fm.timestamp()}_{env_str}_{records}.csv")
     
     nm.run_file(sample_file, output_file, mappings, records, chunksize)
-    return output_file, fm.upload(output_file, fm.join_path_parts(s3_output_dir, env_str, output_file.name))
+    return {
+        path_key: str(output_file),
+        s3_key: fm.upload(output_file, fm.join_path_parts(s3_output_dir, env_str, output_file.name))
+    }
 
-def compare(local_folder: Path, local_source: Path, s3_source: str, local_compare: Path, s3_compare: str) -> tuple[str, str]:
+def compare(local_folder: Path, source_info: dict[str, str], compare_info: dict[str, str]) -> None:
     fm = FileManager(local_folder)
 
-    def get_s3(type: str, local: Path, s3: str) -> Path:
-        if not local.exists():
-            return fm.download(s3, local.name)
+    def get_s3(type: str, info: dict[str, str]) -> Path:
+        local_path = Path(info[path_key])
+        s3_path = info[s3_key]
 
-        print(f"Local file for {s3} already exists at {local}, using as {type} file")
-        return local
+        if not local_path.exists():
+            return fm.download(s3_path, local_path.name)
 
-    source_path = get_s3("source", local_source, s3_source)
-    compare_path = get_s3("compare", local_compare, s3_compare)
+        print(f"Local file for {s3_path} already exists at {local_path}, using as {type} file")
+        return local_path
+
+    source_path = get_s3("source", source_info)
+    compare_path = get_s3("compare", compare_info)
 
     source_df = pd.read_csv(source_path, dtype=str)
     compare_df = pd.read_csv(compare_path, dtype=str)
@@ -231,13 +243,13 @@ def main(records: int, chunksize: int, workers: int, use_get: bool, use_prod: bo
     s3_file = "namesmatching-testdata-july2026.csv"
     
     # Get prod results
-    local_prod, s3_prod = retrieve(data_folder, s3_file, Env.PROD, method, workers, records, chunksize, use_prod)
+    prod_info = retrieve(data_folder, s3_file, Env.PROD, method, workers, records, chunksize, use_prev=use_prod)
 
     # Get test results
-    local_test, s3_test = retrieve(data_folder, s3_file, Env.TEST, method, workers, records, chunksize, use_test)
+    test_info = retrieve(data_folder, s3_file, Env.TEST, method, workers, records, chunksize, use_prev=use_test)
 
     # Compare test and prod
-    compare(data_folder, local_prod, s3_prod, local_test, s3_test)
+    compare(data_folder, prod_info, test_info)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate namesmatching in test with prod")
