@@ -9,26 +9,6 @@ s3_bucket = "ala-databox-avro"
 s3_base_path = "name-matching-reporting"
 s3_output_dir = "testing"
 
-path_key = "path"
-s3_key = "s3"
-
-mappings = {
-    Param.KINGDOM: "rawkingdom",
-    Param.PHYLUM: "rawphylum",
-    Param.CLASS: "rawclass",
-    Param.ORDER: "raworder",
-    Param.FAMILY: "rawfamily",
-    Param.GENUS: "rawgenus",
-    Param.S_EPITHET: "rawspecificepithet",
-    Param.I_EPITHET: "rawinfraspecificepithet",
-    Param.RANK: "rawtaxonrank",
-    Param.VERB_RANK: "verbatimtaxonrank",
-    Param.AUTHORSHIP: "rawscientificnameauthorship",
-    Param.SCI_NAME: "rawscientificname",
-    Param.VERN_NAME: "rawvernacularname",
-    Param.TAXON_ID: "rawtaxonid"
-}
-
 class FileManager:
     def __init__(self, local_folder: Path):
         self._local_folder = local_folder
@@ -117,7 +97,17 @@ class SampleParams:
     chunksize: int
     headers: dict = field(default_factory=dict)
 
-def most_recent(local_folder: Path, env: Env, records: int) -> dict[str, str]:
+@dataclass
+class S3File:
+    local_path: str
+    s3_path: str
+
+@dataclass
+class DataSample:
+    s3_path: str
+    mappings: dict[Param, str]
+
+def most_recent(local_folder: Path, env: Env, records: int) -> S3File | None:
     fm = FileManager(local_folder)
     env_str = env.name.lower()
     s3_folder = fm.join_path_parts(s3_output_dir, env_str)
@@ -141,49 +131,62 @@ def most_recent(local_folder: Path, env: Env, records: int) -> dict[str, str]:
             last_time = timestamp
 
     if last:
-        return {
-            s3_key: fm.join_path_parts(s3_folder, last),
-            path_key: str(fm.local_path(last))
-        }
+        return S3File(str(fm.local_path(last)), fm.join_path_parts(s3_folder, last))
 
-    return {}
+def get_test_data() -> DataSample:
+    s3_path = "namesmatching-testdata-july2026.csv"
+    mappings = mappings = {
+        Param.KINGDOM: "rawkingdom",
+        Param.PHYLUM: "rawphylum",
+        Param.CLASS: "rawclass",
+        Param.ORDER: "raworder",
+        Param.FAMILY: "rawfamily",
+        Param.GENUS: "rawgenus",
+        Param.S_EPITHET: "rawspecificepithet",
+        Param.I_EPITHET: "rawinfraspecificepithet",
+        Param.RANK: "rawtaxonrank",
+        Param.VERB_RANK: "verbatimtaxonrank",
+        Param.AUTHORSHIP: "rawscientificnameauthorship",
+        Param.SCI_NAME: "rawscientificname",
+        Param.VERN_NAME: "rawvernacularname",
+        Param.TAXON_ID: "rawtaxonid"
+    }
 
-def retrieve(local_folder: Path, s3_sample: str, env: Env, sample_params: SampleParams, use_prev: bool = False) -> dict[str, str]:
+    return DataSample(s3_path, mappings)
+
+def retrieve(local_folder: Path, sample_data: DataSample, env: Env, sample_params: SampleParams, use_prev: bool = False) -> S3File:
     if use_prev:
         last = most_recent(local_folder, env, sample_params.records)
-        if last:
-            print(f"Using most recent file in s3 {last[s3_key]}")
+        if last is not None:
+            print(f"Using most recent file in s3 {last.s3_path}")
             return last
 
-    return sample(local_folder, s3_sample, env, sample_params)
+    return sample(local_folder, sample_data, env, sample_params)
 
-def sample(local_folder: Path, s3_sample: str, env: Env, sample_params: SampleParams) -> dict[str, str]: 
+def sample(local_folder: Path, sample_data: DataSample, env: Env, sample_params: SampleParams) -> S3File: 
     fm = FileManager(local_folder)
     nm = NamesMatching(env, sample_params.method, sample_params.workers, sample_params.headers)
     env_str = env.name.lower()
 
-    sample_file = fm.download(s3_sample, fm.local_path("sample.csv"), overwrite=False)
+    sample_file = fm.download(sample_data.s3_path, fm.local_path("sample.csv"), overwrite=False)
     output_file = fm.local_path(f"{fm.timestamp()}_{env_str}_{sample_params.records}.csv")
     
-    nm.run_file(sample_file, output_file, mappings, sample_params.records, sample_params.chunksize)
-    return {
-        path_key: str(output_file),
-        s3_key: fm.upload(output_file, fm.join_path_parts(s3_output_dir, env_str, output_file.name))
-    }
+    nm.run_file(sample_file, output_file, sample_data.mappings, sample_params.records, sample_params.chunksize)
+    s3_path = fm.upload(output_file, fm.join_path_parts(s3_output_dir, env_str, output_file.name))
+    return S3File(str(output_file), s3_path)
 
-def compare(local_folder: Path, source_info: dict[str, str], compare_info: dict[str, str], records: int, chunksize: int) -> None:
+def compare(local_folder: Path, source_info: S3File, compare_info: S3File, records: int, chunksize: int) -> None:
     import pandas as pd
 
     fm = FileManager(local_folder)
 
-    def get_s3(type: str, info: dict[str, str]) -> Path:
-        local_path = Path(info[path_key])
-        s3_path = info[s3_key]
+    def get_s3(type: str, info: S3File) -> Path:
+        local_path = Path(info.local_path)
 
         if not local_path.exists():
-            return fm.download(s3_path, local_path)
+            return fm.download(info.s3_path, local_path)
 
-        print(f"Local file for {s3_path} already exists at {local_path}, using as {type} file")
+        print(f"Local file for {info.local_path} already exists at {local_path}, using as {type} file")
         return local_path
 
     source_path = get_s3("source", source_info)
@@ -262,14 +265,16 @@ def main(records: int, chunksize: int, workers: int, use_get: bool, use_prod: bo
     method = Method.GET if use_get else Method.POST
 
     data_folder = Path(__file__).parents[1] / "data"
-    s3_file = "namesmatching-testdata-july2026.csv"
     sample_params = SampleParams(method, workers, records, chunksize)
+
+    # Get sample file
+    data_sample = get_test_data()
     
     # Get prod results
-    prod_info = retrieve(data_folder, s3_file, Env.PROD, sample_params, use_prev=use_prod)
+    prod_info = retrieve(data_folder, data_sample, Env.PROD, sample_params, use_prev=use_prod)
 
     # Get test results
-    test_info = retrieve(data_folder, s3_file, Env.TEST, sample_params, use_prev=use_test)
+    test_info = retrieve(data_folder, data_sample, Env.TEST, sample_params, use_prev=use_test)
 
     # Compare test and prod
     compare(data_folder, prod_info, test_info, records, chunksize)
