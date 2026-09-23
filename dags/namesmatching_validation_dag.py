@@ -72,9 +72,9 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
         return retrieve(local_folder, sample_file, env, sample_params, use_latest, group_id)
 
     @task.virtualenv(requirements=["pandas"])
-    def compare(local_folder: Path, prod_info: dict[str, str], test_info: dict[str, str], records: int) -> None:
+    def compare(local_folder: Path, prod_info: dict[str, str], test_info: dict[str, str], records: int, chunksize: int) -> None:
         from namesmatching_validation_cli import compare # Required to be run within virtual env
-        compare(local_folder, prod_info, test_info, records)
+        compare(local_folder, prod_info, test_info, records, chunksize)
 
     @task.virtualenv(requirements=["pandas"], trigger_rule=TriggerRule.ALL_DONE)
     def cleanup(local_folder: Path) -> None:
@@ -88,6 +88,6 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
     sample_file = build_sample()
     prod_outputs = create_retrieve_task_group(local_folder, sample_file, Env.PROD, sample_params, use_latest_prod)
     test_outputs = create_retrieve_task_group(local_folder, sample_file, Env.TEST, sample_params, use_latest_test)
-    compare(local_folder, prod_outputs, test_outputs, record_limit) >> cleanup(local_folder)
+    compare(local_folder, prod_outputs, test_outputs, record_limit, chunk_size) >> cleanup(local_folder)
 
 validate_namesmatching()

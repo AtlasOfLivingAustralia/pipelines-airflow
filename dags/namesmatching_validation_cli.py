@@ -153,7 +153,7 @@ def retrieve(local_folder: Path, s3_sample: str, env: Env, sample_params: Sample
         last = most_recent(local_folder, env, sample_params.records)
         if last:
             print(f"Using most recent file in s3 {last[s3_key]}")
-            return 
+            return last
 
     return sample(local_folder, s3_sample, env, sample_params)
 
@@ -171,7 +171,7 @@ def sample(local_folder: Path, s3_sample: str, env: Env, sample_params: SamplePa
         s3_key: fm.upload(output_file, fm.join_path_parts(s3_output_dir, env_str, output_file.name))
     }
 
-def compare(local_folder: Path, source_info: dict[str, str], compare_info: dict[str, str], records: int) -> None:
+def compare(local_folder: Path, source_info: dict[str, str], compare_info: dict[str, str], records: int, chunksize: int) -> None:
     import pandas as pd
 
     fm = FileManager(local_folder)
@@ -188,55 +188,62 @@ def compare(local_folder: Path, source_info: dict[str, str], compare_info: dict[
 
     source_path = get_s3("source", source_info)
     compare_path = get_s3("compare", compare_info)
+    s3_folder = f"{source_path.stem}+{compare_path.stem}"
 
-    source_df = pd.read_csv(source_path, dtype=str, nrows=records)
-    compare_df = pd.read_csv(compare_path, dtype=str, nrows=records)
+    read_kwargs = {
+        "dtype": str,
+        "keep_default_na": False,
+        "nrows": records,
+        "chunksize": chunksize // 2, # Half chunk size as 2 files open at a time
+    }
 
-    s3_folder = f"{source_path.stem}+{compare_path.stem}" 
+    # Length totals across chunks
+    issues_len = 0
+    source_len = 0
 
-    issues = pd.DataFrame()
-    diffs = pd.DataFrame()
-    for column in source_df.columns:
-        mask = source_df[column] == compare_df[column]
-        expected = source_df[column].mask(mask)
-        actual = compare_df[column].mask(mask)
-    
-        if not expected.dropna().empty:
-            col_name = column.split("_", 1)[-1]
-            issues[f"expected_{col_name}"] = expected
-            issues[f"actual_{col_name}"] = actual
-            diffs[col_name] = expected + " -> " + actual
-    
-    issues.insert(0, RetParam.PARAMS.value, source_df[RetParam.PARAMS.value])
-    issues = issues.dropna(how="all", subset=issues.columns.difference([RetParam.PARAMS.value]))
-    
-    error_percent = 100 * len(issues) / len(source_df)
-    print(f"Found {len(issues)} incorrect matches from {len(source_df)} records ({error_percent:.02f}%)")
-
-    if issues.empty:
-        print(f"Output from test matches output from prod")
-
-    issues.index.name = "source_row"
-    issues_path = fm.local_path(f"{fm.timestamp()}_issues.csv")
-    issues.to_csv(issues_path)
-    
-    diff_list = []
-    for column in diffs.columns:
-        vc = diffs[column].value_counts()
-        vc.index.name = "changes"
-        vc = vc.reset_index()
-        totals = pd.DataFrame({"changes": "TOTAL", "count": vc["count"].sum()}, index=[0])
-        vc = pd.concat([totals, vc], ignore_index=True)
-        vc.insert(0, "column", column)
-        vc["percentage"] = vc["count"].apply(lambda x: f"{100 * x / len(source_df):0.2f}%")
-        diff_list.append(vc)
-    
-    global_totals = pd.DataFrame({"column": "OVERALL", "changes": "TOTAL", "count": len(issues), "percentage": f"{error_percent:.02f}%"}, index=[0])
-    diffs = pd.concat([global_totals] + diff_list)
     diffs_path = fm.local_path(f"{fm.timestamp()}_diffs.csv")
+    diff_data: dict[str, dict[str, int]] = {}
+
+    iterator: zip[tuple[pd.DataFrame, pd.DataFrame]] = zip(pd.read_csv(source_path, **read_kwargs), pd.read_csv(compare_path, **read_kwargs))
+    for source_df, compare_df in iterator:
+        compare_df = compare_df[source_df.columns]
+
+        source_len += len(source_df)
+        issues_len += (source_df != compare_df).any(axis=1).sum()
+
+        for column in source_df.columns:
+            mask = source_df[column] == compare_df[column]
+            expected = source_df[column].mask(mask)
+            actual = compare_df[column].mask(mask)
+
+            if not (~mask).sum():
+                continue
+
+            diff = expected.str.cat(actual, sep=" -> ")
+            vc_data = diff.value_counts().to_dict() # {change: count}
+
+            if column not in diff_data:
+                diff_data[column] = vc_data
+                continue
+
+            for change, count in vc_data.items():
+                if change not in diff_data[column]:
+                    diff_data[column][change] = count
+                else:
+                    diff_data[column][change] += count
+
+    percentage = lambda count, total: f"{(count * 100 / total):.02f}" 
+    error_percent = percentage(issues_len, source_len)
+
+    diff_data = {"OVERALL": {"TOTAL": issues_len}} | diff_data
+    flat_diff = [{"column": col_name, "change": change, "count": count, "error(%)": percentage(count, source_len)} for col_name, col_data in diff_data.items() for change, count in col_data.items()]
+    diffs = pd.DataFrame.from_records(flat_diff)
     diffs.to_csv(diffs_path, index=False)
 
-    fm.upload(issues_path, fm.join_path_parts(s3_output_dir, "comparison", s3_folder, issues_path.name))
+    print(f"Found {issues_len} incorrect matches from {source_len} records ({error_percent}%)")
+    if issues_len == 0:
+        print(f"Output from test matches output from prod")
+
     fm.upload(diffs_path, fm.join_path_parts(s3_output_dir, "comparison", s3_folder, diffs_path.name))
 
 def main(records: int, chunksize: int, workers: int, use_get: bool, use_prod: bool, use_test: bool) -> None:
@@ -265,7 +272,7 @@ def main(records: int, chunksize: int, workers: int, use_get: bool, use_prod: bo
     test_info = retrieve(data_folder, s3_file, Env.TEST, sample_params, use_prev=use_test)
 
     # Compare test and prod
-    compare(data_folder, prod_info, test_info)
+    compare(data_folder, prod_info, test_info, records, chunksize)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate namesmatching in test with prod")
