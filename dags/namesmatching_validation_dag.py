@@ -18,17 +18,17 @@ from dataclasses import asdict
 def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_workers: int = 10, use_post_request: bool = True, use_latest_prod: bool = True, use_latest_test: bool = False):
 
     @task
-    def build_sample() -> nmcli.DataSample:
-        return nmcli.get_test_data()
+    def build_sample() -> dict:
+        return asdict(nmcli.get_test_data())
 
-    def create_retrieve_task_group(local_folder: Path, data_sample: nmcli.DataSample, env: Env, sample_params: nmcli.SampleParams, use_latest: bool):
+    def create_retrieve_task_group(local_folder: Path, data_sample: dict, env: Env, sample_params: nmcli.SampleParams, use_latest: bool):
         group_id = env.name.lower()
 
         @task_group(group_id=group_id)
-        def retrieve(local_folder: Path, data_sample: nmcli.DataSample, env: Env, sample_params: nmcli.SampleParams, use_latest: bool, group_id: str) -> nmcli.S3File:
+        def retrieve(local_folder: Path, data_sample: dict, env: Env, sample_params: nmcli.SampleParams, use_latest: bool, group_id: str) -> dict:
 
             @task(multiple_outputs=False)
-            def check_previous(local_folder: Path, env: Env, records: int, use_latest: bool) -> nmcli.S3File | None:
+            def check_previous(local_folder: Path, env: Env, records: int, use_latest: bool) -> dict | None:
                 def _log_generate() -> None:
                     print(f"Generating new '{env.name.lower()}' file with {records} records")
 
@@ -43,24 +43,24 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
                     return
 
                 print(f"Using previous file: {last.s3_path}")
-                return last
+                return asdict(last)
 
             @task.branch
-            def sample_if_empty(previous: dict, group_id: str) -> str:
-                return f"{group_id}.sample" if previous is None else f"{group_id}.resolve_output" # Run sample task if not using previous data
+            def sample_if_empty(use_previous: bool, group_id: str) -> str:
+                return f"{group_id}.resolve_output" if use_previous else f"{group_id}.sample" # Run sample task if not using previous data
 
             @task.virtualenv(requirements=["pandas"], multiple_outputs=False)
-            def sample(local_folder: Path, data_sample: dict, env: Env, sample_params: dict) -> dict[str, str]:
-                from namesmatching_validation_cli import sample, SampleParams, DataSample # Required to be run within virtual env
-                return sample(local_folder, DataSample(**data_sample), env, SampleParams(**sample_params))
+            def sample(local_folder: Path, data_sample: dict, env: Env, sample_params: dict) -> dict:
+                from namesmatching_validation_cli import sample, DataSample, SampleParams # Required to be run within virtual env
+                return asdict(sample(local_folder, DataSample(**data_sample), env, SampleParams(**sample_params)))
 
             @task(trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS, multiple_outputs=False)
             def resolve_output(previous_output: dict, sampled_output: dict) -> dict:
                 return previous_output or sampled_output
 
             previous = check_previous(local_folder, env, sample_params.records, use_latest)
-            branch_decision = sample_if_empty(previous, group_id)
-            sample_output = sample(local_folder, asdict(data_sample), env, asdict(sample_params))
+            branch_decision = sample_if_empty(previous is not None, group_id)
+            sample_output = sample(local_folder, data_sample, env, asdict(sample_params))
             final_output = resolve_output(previous, sample_output)
 
             branch_decision >> final_output # Branch to output if previous isn't empty
@@ -72,9 +72,9 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
         return retrieve(local_folder, data_sample, env, sample_params, use_latest, group_id)
 
     @task.virtualenv(requirements=["pandas"])
-    def compare(local_folder: Path, prod_info: nmcli.S3File, test_info: nmcli.S3File, records: int, chunksize: int) -> None:
-        from namesmatching_validation_cli import compare # Required to be run within virtual env
-        compare(local_folder, prod_info, test_info, records, chunksize)
+    def compare(local_folder: Path, prod_info: dict, test_info: dict, records: int, chunksize: int) -> None:
+        from namesmatching_validation_cli import compare, S3File # Required to be run within virtual env
+        compare(local_folder, S3File(**prod_info), S3File(**test_info), records, chunksize)
 
     @task.virtualenv(requirements=["pandas"], trigger_rule=TriggerRule.ALL_DONE)
     def cleanup(local_folder: Path) -> None:

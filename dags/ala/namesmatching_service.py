@@ -6,14 +6,14 @@ from requests.adapters import HTTPAdapter
 from urllib.parse import urljoin
 from urllib3.util import Retry
 import concurrent.futures as cf
-from enum import Enum
+from enum import StrEnum, Enum
 from pathlib import Path
 import time
 
 if TYPE_CHECKING:
     import pandas as pd
 
-class Param(Enum):
+class Param(StrEnum):
     _HINTS     = "hints"
     _LOOSE     = "loose"
     KINGDOM    = "kingdom"
@@ -31,7 +31,7 @@ class Param(Enum):
     VERN_NAME  = "vernacularName"
     TAXON_ID   = "taxonID"
 
-class RetParam(Enum):
+class RetParam(StrEnum):
     _IDX        = "idx"
     METHOD      = "method"
     PARAMS      = "params" 
