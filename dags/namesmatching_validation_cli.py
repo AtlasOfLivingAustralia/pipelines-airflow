@@ -4,10 +4,23 @@ import boto3
 import argparse
 from ala.namesmatching_service import Method, Param, Env, NamesMatching, RetParam
 from dataclasses import dataclass, field
+import time
 
 s3_bucket = "ala-databox-avro"
 s3_base_path = "name-matching-reporting"
 s3_output_dir = "testing"
+
+athena_region = "ap-southeast-2"
+athena_database = "prod"
+athena_s3_dir = "samples"
+
+query = "Select distinct raw_scientificName as rawScientificName, raw_kingdom as rawKingdom,\
+ raw_phylum as rawPhylum, raw_class as rawClass, raw_order as rawOrder, raw_family as rawFamily,\
+ raw_genus as rawGenus, raw_specificepithet as rawSpecificEpithet, raw_infraspecificepithet as rawInfraspecificEpithet,\
+ verbatimtaxonrank as verbatimtaxonrank, specificepithet, infraspecificepithet, raw_species as rawSpecies,\
+ matchtype as matchType, scientificName, taxonconceptid, raw_vernacularname as rawvernacularname,\
+ raw_scientificnameauthorship as rawscientificnameauthorship, taxonid as rawtaxonid from taxon t,\
+ additional a where t.id_prefix=a.id_prefix and t.dataresourceuid = a.dataresourceuid and t.id = a.id"
 
 class FileManager:
     def __init__(self, local_folder: Path):
@@ -16,6 +29,7 @@ class FileManager:
             self._local_folder.mkdir(parents=True)
 
         self.s3_client = None
+        self.athena_client = None
 
     @staticmethod
     def bucket_loc(object_path: str) -> str:
@@ -89,6 +103,52 @@ class FileManager:
 
         return s3_path
 
+    def query(self, query: str) -> str | None:
+        if self.athena_client is None:
+            self.athena_client = boto3.client("athena", region_name=athena_region)
+
+        s3_dir = self.join_path_parts(s3_output_dir, athena_s3_dir)
+        response = self.athena_client.start_query_execution(
+            QueryString=query,
+            QueryExecutionContext={
+                "Database": athena_database
+            },
+            ResultConfiguration={
+                "OutputLocation": self.object_uri(s3_dir)
+            }
+        )
+
+        query_execution_id = response['QueryExecutionId']
+        print(f"Query started, has execution ID: {query_execution_id}")
+        s3_path = self.bucket_loc(self.join_path_parts(s3_dir, f"{query_execution_id}.csv")) # Athena always outputs file with execution_id name
+
+        poll_update = 0.5
+        recheck_after_updates = 20
+        _at = 0
+        _cycle = "/-\\|"
+
+        while True:
+            status_response = self.athena_client.get_query_execution(QueryExecutionId=query_execution_id)
+            query_state = status_response['QueryExecution']['Status']['State']
+            
+            if query_state in ['SUCCEEDED', 'FAILED', 'CANCELLED']:
+                print(f"\n{query_state}!")
+                break
+
+            for _ in range(recheck_after_updates):
+                print(f"Running Query ({_cycle[_at]})", end="\r")
+                _at = (_at + 1) % len(_cycle)
+                time.sleep(poll_update)
+
+        if query_state == 'SUCCEEDED':
+            print("Query finished successfully!")
+            print(f"Your results are saved at: {s3_path}")
+            return s3_path
+        
+        error_reason = status_response['QueryExecution']['Status'].get('StateChangeReason', 'Unknown error')
+        print(f"Query {query_state.lower()}!")
+        print(f"Reason: {error_reason}")
+
 @dataclass
 class SampleParams:
     method: Method
@@ -133,7 +193,7 @@ def most_recent(local_folder: Path, env: Env, records: int) -> S3File | None:
     if last:
         return S3File(str(fm.local_path(last)), fm.join_path_parts(s3_folder, last))
 
-def get_test_data() -> DataSample:
+def get_test_data(local_folder: Path, use_prev: bool) -> DataSample:
     s3_path = "namesmatching-testdata-july2026.csv"
     mappings = mappings = {
         Param.KINGDOM: "rawkingdom",
@@ -151,6 +211,10 @@ def get_test_data() -> DataSample:
         Param.VERN_NAME: "rawvernacularname",
         Param.TAXON_ID: "rawtaxonid"
     }
+
+    if not use_prev:
+        fm = FileManager(local_folder)
+        s3_path = fm.query(query)
 
     return DataSample(s3_path, mappings)
 
@@ -249,7 +313,7 @@ def compare(local_folder: Path, source_info: S3File, compare_info: S3File, recor
 
     fm.upload(diffs_path, fm.join_path_parts(s3_output_dir, "comparison", s3_folder, diffs_path.name))
 
-def main(records: int, chunksize: int, workers: int, use_get: bool, use_prod: bool, use_test: bool) -> None:
+def main(records: int, chunksize: int, workers: int, use_get: bool, use_sample: bool, use_prod: bool, use_test: bool) -> None:
     if workers < 1:
         print("Clamping workers to minimum value of 1")
         workers = 1
@@ -268,8 +332,8 @@ def main(records: int, chunksize: int, workers: int, use_get: bool, use_prod: bo
     sample_params = SampleParams(method, workers, records, chunksize)
 
     # Get sample file
-    data_sample = get_test_data()
-    
+    data_sample = get_test_data(data_folder, use_sample)
+
     # Get prod results
     prod_info = retrieve(data_folder, data_sample, Env.PROD, sample_params, use_prev=use_prod)
 
@@ -285,8 +349,9 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--chunksize", type=int, default=100000, help="Chunksize to process in (default: %(default)s)")
     parser.add_argument("-w", "--workers", type=int, default=10, help="Amount of workers to run against names matching (default: %(default)s)")
     parser.add_argument("-g", "--useget", action="store_true", help="Use GET method for testing instead of default POST method")
+    parser.add_argument("-s", "--usesample", action="store_true", help="Use latest sample file instead of generating")
     parser.add_argument("-p", "--useprod", action="store_true", help="Use latest prod file with sufficient records instead of generating")
     parser.add_argument("-t", "--usetest", action="store_true", help="Usel latest test file with sufficient records instead og generating")
     args = parser.parse_args()
 
-    main(args.records, args.chunksize, args.workers, args.useget, args.useprod, args.usetest)
+    main(args.records, args.chunksize, args.workers, args.useget, args.usesample, args.useprod, args.usetest)
