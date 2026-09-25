@@ -5,14 +5,7 @@ import argparse
 from ala.namesmatching_service import Method, Param, Env, NamesMatching, RetParam
 from dataclasses import dataclass, field
 import time
-
-s3_bucket = "ala-databox-avro"
-s3_base_path = "name-matching-reporting"
-s3_output_dir = "testing"
-
-athena_region = "ap-southeast-2"
-athena_database = "prod"
-athena_s3_dir = "samples"
+from enum import StrEnum
 
 query = "Select distinct raw_scientificName as rawScientificName, raw_kingdom as rawKingdom,\
  raw_phylum as rawPhylum, raw_class as rawClass, raw_order as rawOrder, raw_family as rawFamily,\
@@ -22,33 +15,189 @@ query = "Select distinct raw_scientificName as rawScientificName, raw_kingdom as
  raw_scientificnameauthorship as rawscientificnameauthorship, taxonid as rawtaxonid from taxon t,\
  additional a where t.id_prefix=a.id_prefix and t.dataresourceuid = a.dataresourceuid and t.id = a.id"
 
-class FileManager:
-    def __init__(self, local_folder: Path):
-        self._local_folder = local_folder
-        if not self._local_folder.exists():
-            self._local_folder.mkdir(parents=True)
+mappings = {
+    Param.KINGDOM: "rawkingdom",
+    Param.PHYLUM: "rawphylum",
+    Param.CLASS: "rawclass",
+    Param.ORDER: "raworder",
+    Param.FAMILY: "rawfamily",
+    Param.GENUS: "rawgenus",
+    Param.S_EPITHET: "rawspecificepithet",
+    Param.I_EPITHET: "rawinfraspecificepithet",
+    Param.RANK: "rawtaxonrank",
+    Param.VERB_RANK: "verbatimtaxonrank",
+    Param.AUTHORSHIP: "rawscientificnameauthorship",
+    Param.SCI_NAME: "rawscientificname",
+    Param.VERN_NAME: "rawvernacularname",
+    Param.TAXON_ID: "rawtaxonid"
+}
 
-        self.s3_client = None
-        self.athena_client = None
+class S3Folder(StrEnum):
+    SAMPLES = "samples"
+    PROD = "prod"
+    TEST = "test"
+    COMP = "comparison"
+
+@dataclass
+class DataSample:
+    s3_full_path: str
+    mappings: dict = field(default_factory=dict)
+
+@dataclass
+class SampleParams:
+    method: Method
+    workers: int
+    records: int
+    chunksize: int
+    headers: dict = field(default_factory=dict)
+
+class AWSManager:
+
+    class Module(StrEnum):
+        S3 = "s3"
+        ATHENA = "athena"
+
+    def __init__(self, module: str, client_kwargs: dict = None):
+        self._module = module
+        self._client_kwargs = client_kwargs or {}
+        self._client = None
 
     @staticmethod
-    def bucket_loc(object_path: str) -> str:
-        return FileManager.join_path_parts(s3_base_path, object_path)
+    def requires_client(func) -> callable:
+        def wrapper(self, *args, **kwargs) -> any:
+            if self._client is None:
+                self._client = boto3.client(self._module, **self._client_kwargs)
 
-    @staticmethod
-    def object_uri(object_path: str) -> str:
-        return f"s3://{FileManager.join_path_parts(s3_bucket, s3_base_path, object_path)}"
+            return func(self, *args, **kwargs)
+        return wrapper
 
-    def local_path(self, file_path: str) -> Path:
-        return self._local_folder / file_path
+class S3Manager(AWSManager):
+
+    bucket = "ala-databox-avro"
+    base_path = "name-matching-reporting/testing"
+
+    class Property(StrEnum):
+        KEY = "Key"
+        MODIFIED = "LastModified"
+        SIZE = "Size"
+
+    def __init__(self):
+        super().__init__(self.Module.S3)
 
     @staticmethod
     def join_path_parts(*parts: str) -> str:
         return "/".join(part.strip("/") for part in parts)
 
-    @staticmethod
-    def timestamp() -> str:
-        return datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    def full_path(self, *path_parts: str) -> str:
+        return self.join_path_parts(self.base_path, *path_parts)
+
+    def uri_from_path(self, full_path: str) -> str:
+        return f"s3://{self.bucket}/{full_path}"
+
+    def full_uri(self, *path_parts: str) -> str:
+        return self.uri_from_path(self.full_path(*path_parts))
+
+    def most_recent(self, full_path: str) -> list[str]:
+        return self.list_objects(full_path, self.Property.MODIFIED, True)
+
+    @AWSManager.requires_client
+    def list_objects(self, full_path: str, sort_by: Property = None, descending: bool = False) -> list[str]:
+        response = self._client.list_objects_v2(Bucket=self.bucket, Prefix=full_path)
+        contents = response["Contents"]
+
+        if sort_by is None:
+            return [item[self.Property.KEY] for item in contents]
+
+        return [item[self.Property.KEY] for item in sorted(response["Contents"], key=lambda x: x[sort_by.value], reverse=descending)]
+
+    @AWSManager.requires_client
+    def download(self, full_path: str, local_path: Path) -> None:
+        print(f"Copying file from {self.uri_from_path(full_path)} to {local_path}")
+        self._client.download_file(self.bucket, full_path, local_path)
+
+    @AWSManager.requires_client
+    def upload(self, local_path: Path, full_path: str) -> None:
+        print(f"Copying file from {local_path} to {self.uri_from_path(full_path)}")
+        self._client.upload_file(local_path, self.bucket, full_path)
+
+    @AWSManager.requires_client
+    def move(self, from_full_path: str, to_full_path: str) -> None:
+       print(f"Moving file from {self.uri_from_path(from_full_path)} to {self.uri_from_path(to_full_path)}")
+       self._client.copy_object(Bucket=self.bucket, Key=to_full_path, CopySource={"Bucket": self.bucket, "Key": from_full_path})
+       self._client.delete_object(Bucket=self.bucket, Key=from_full_path)
+
+class AthenaManager(AWSManager):
+
+    region = "ap-southeast-2"
+    database = "prod"
+    s3_dir = "samples"
+
+    class State(StrEnum):
+        SUCCESS = "SUCCEEDED"
+        FAILED = "FAILED"
+        CANCELLED = "CANCELLED"
+
+    def __init__(self):
+        super().__init__(self.Module.ATHENA)
+
+        self._update_interval = 0.5
+        self._updates_recheck = 20
+
+    def _poll(self, query_id: str) -> tuple[bool, str]:
+        _at = -1
+        _cycle = "/-\\|"
+
+        while True:
+            response = self._client.get_query_execution(QueryExecutionId=query_id)
+            state = response['QueryExecution']['Status']['State']
+
+            if state in self.State._value2member_map_:
+                print() # Skip to line after poll text
+                return state == self.State.SUCCESS, response['QueryExecution']['Status'].get('StateChangeReason', 'Unknown error')
+
+            # Wait for next poll
+            for _ in range(self._updates_recheck):
+                print(f"Running Query ({_cycle[_at := (_at + 1) % len(_cycle)]})", end="\r")
+                time.sleep(self._update_interval)
+
+    @AWSManager.requires_client
+    def query(self, query: str, output_uri: str) -> str:
+        response = self._client.start_query_execution(
+            QueryString=query,
+            QueryExecutionContext={
+                "Database": self.database
+            },
+            ResultConfiguration={
+                "OutputLocation": output_uri
+            }
+        )
+
+        query_id = response['QueryExecutionId']
+        output_file = f"{output_uri.rstrip('/')}/{query_id}.csv"
+        print(f"Query started, execution ID: {query_id}")
+
+        success, reason = self._poll(query_id)
+        if success: 
+            print("Query finished successfully")
+            print(f"Output saved at: {output_file}")
+            return output_file
+        
+        print(f"Query failed")
+        print(f"Reason: {reason}")
+        return ""
+
+class FileManager:
+
+    file_name_part_char = "_"
+
+    def __init__(self, local_folder: Path = None):
+        self._local_folder = local_folder or Path.cwd()
+        
+        if not self._local_folder.exists():
+            self._local_folder.mkdir(parents=True)
+
+    def local_path(self, file_path: str) -> Path:
+        return self._local_folder / file_path
 
     @staticmethod
     def delete_paths(*paths: Path) -> None:
@@ -69,193 +218,94 @@ class FileManager:
             print(f"Cleaned up folder: {folder_path}")
             folder_path.rmdir()
 
-    @staticmethod
-    def _get_client(func) -> callable:
-        def wrapper(self, *args, **kwargs) -> any:
-            if self.s3_client is None:
-                self.s3_client = boto3.client("s3")
+    def timestamp(self) -> str:
+        return datetime.now().strftime(f"%Y-%m-%d{self.file_name_part_char}%H%M%S")
 
-            return func(self, *args, **kwargs)
-        return wrapper
+    def create_local_path(self, core: str, suffix: str = "csv", records: int = -1, prefix_timestamp: bool = False) -> Path:
+        parts = [core]
 
-    @_get_client
-    def list_objects(self, object_path: str) -> list[str]:
-        content = self.s3_client.list_objects_v2(Bucket=s3_bucket, Prefix=self.bucket_loc(object_path))
-        return [item["Key"].split(object_path)[-1].strip("/") for item in content["Contents"]]
+        if records >= 0:
+            parts.append(records)
 
-    @_get_client
-    def download(self, s3_path: str, local_path: Path, overwrite: bool = True) -> Path:
-        if local_path.exists() and not overwrite:
-            print(f"Local path {local_path} exists and not overwriting, skipping download")
-            return local_path
+        if prefix_timestamp:
+            parts.insert(0, self.timestamp())
 
-        print(f"Copying file from {self.object_uri(s3_path)} to {local_path}")
-        self.s3_client.download_file(s3_bucket, self.bucket_loc(s3_path), local_path)
-        return local_path
+        return self.local_path(f"{self.file_name_part_char.join(parts)}.{suffix}")
 
-    @_get_client
-    def upload(self, local_path: Path, s3_path: str, delete_local: bool = False) -> str:
-        print(f"Copying file from {local_path} to {self.object_uri(s3_path)}")
-        self.s3_client.upload_file(local_path, s3_bucket, self.bucket_loc(s3_path))
+    def get_records(self, file_name: str) -> int:
+        record_component = file_name.rsplit(self.file_name_part_char, 1)[-1].split(".")[0]
+        if record_component.isnumeric():
+            return int(record_component)
 
-        if delete_local:
-            self.delete_paths(local_path)
-
-        return s3_path
-
-    def query(self, query: str) -> str | None:
-        if self.athena_client is None:
-            self.athena_client = boto3.client("athena", region_name=athena_region)
-
-        s3_dir = self.join_path_parts(s3_output_dir, athena_s3_dir)
-        response = self.athena_client.start_query_execution(
-            QueryString=query,
-            QueryExecutionContext={
-                "Database": athena_database
-            },
-            ResultConfiguration={
-                "OutputLocation": self.object_uri(s3_dir)
-            }
-        )
-
-        query_execution_id = response['QueryExecutionId']
-        print(f"Query started, has execution ID: {query_execution_id}")
-        s3_path = self.bucket_loc(self.join_path_parts(s3_dir, f"{query_execution_id}.csv")) # Athena always outputs file with execution_id name
-
-        poll_update = 0.5
-        recheck_after_updates = 20
-        _at = 0
-        _cycle = "/-\\|"
-
-        while True:
-            status_response = self.athena_client.get_query_execution(QueryExecutionId=query_execution_id)
-            query_state = status_response['QueryExecution']['Status']['State']
-            
-            if query_state in ['SUCCEEDED', 'FAILED', 'CANCELLED']:
-                print(f"\n{query_state}!")
-                break
-
-            for _ in range(recheck_after_updates):
-                print(f"Running Query ({_cycle[_at]})", end="\r")
-                _at = (_at + 1) % len(_cycle)
-                time.sleep(poll_update)
-
-        if query_state == 'SUCCEEDED':
-            print("Query finished successfully!")
-            print(f"Your results are saved at: {s3_path}")
-            return s3_path
-        
-        error_reason = status_response['QueryExecution']['Status'].get('StateChangeReason', 'Unknown error')
-        print(f"Query {query_state.lower()}!")
-        print(f"Reason: {error_reason}")
-
-@dataclass
-class SampleParams:
-    method: Method
-    workers: int
-    records: int
-    chunksize: int
-    headers: dict = field(default_factory=dict)
-
-@dataclass
-class S3File:
-    local_path: str
-    s3_path: str
-
-@dataclass
-class DataSample:
-    s3_path: str
-    mappings: dict[Param, str]
-
-def most_recent(local_folder: Path, env: Env, records: int) -> S3File | None:
-    fm = FileManager(local_folder)
-    env_str = env.name.lower()
-    s3_folder = fm.join_path_parts(s3_output_dir, env_str)
-
-    last = ""
-    last_time = None
-    for file_name in fm.list_objects(s3_folder):
-        name, suffix = file_name.rsplit(".", 1)
-        if suffix != "csv":
-            continue
-
-        date, time, _, entries = name.split("_")
-        entries = int(entries)
-
-        if entries < records:
-            continue
-
-        timestamp = datetime.fromisoformat(f"{date}_{time}")
-        if (not last) or (timestamp > last_time):
-            last = file_name
-            last_time = timestamp
-
-    if last:
-        return S3File(str(fm.local_path(last)), fm.join_path_parts(s3_folder, last))
-
-def get_test_data(local_folder: Path, use_prev: bool) -> DataSample:
-    s3_path = "namesmatching-testdata-july2026.csv"
-    mappings = mappings = {
-        Param.KINGDOM: "rawkingdom",
-        Param.PHYLUM: "rawphylum",
-        Param.CLASS: "rawclass",
-        Param.ORDER: "raworder",
-        Param.FAMILY: "rawfamily",
-        Param.GENUS: "rawgenus",
-        Param.S_EPITHET: "rawspecificepithet",
-        Param.I_EPITHET: "rawinfraspecificepithet",
-        Param.RANK: "rawtaxonrank",
-        Param.VERB_RANK: "verbatimtaxonrank",
-        Param.AUTHORSHIP: "rawscientificnameauthorship",
-        Param.SCI_NAME: "rawscientificname",
-        Param.VERN_NAME: "rawvernacularname",
-        Param.TAXON_ID: "rawtaxonid"
-    }
-
-    if not use_prev:
-        fm = FileManager(local_folder)
-        s3_path = fm.query(query)
-
-    return DataSample(s3_path, mappings)
-
-def retrieve(local_folder: Path, sample_data: DataSample, env: Env, sample_params: SampleParams, use_prev: bool = False) -> S3File:
-    if use_prev:
-        last = most_recent(local_folder, env, sample_params.records)
-        if last is not None:
-            print(f"Using most recent file in s3 {last.s3_path}")
-            return last
-
-    return sample(local_folder, sample_data, env, sample_params)
-
-def sample(local_folder: Path, sample_data: DataSample, env: Env, sample_params: SampleParams) -> S3File: 
-    fm = FileManager(local_folder)
-    nm = NamesMatching(env, sample_params.method, sample_params.workers, sample_params.headers)
-    env_str = env.name.lower()
-
-    sample_file = fm.download(sample_data.s3_path, fm.local_path("sample.csv"), overwrite=False)
-    output_file = fm.local_path(f"{fm.timestamp()}_{env_str}_{sample_params.records}.csv")
+        return -1
     
-    nm.run_file(sample_file, output_file, sample_data.mappings, sample_params.records, sample_params.chunksize)
-    s3_path = fm.upload(output_file, fm.join_path_parts(s3_output_dir, env_str, output_file.name))
-    return S3File(str(output_file), s3_path)
+def get_test_data(use_prev: bool) -> DataSample:
+    s3 = S3Manager()
+    data_dir = s3.full_path(S3Folder.SAMPLES)
 
-def compare(local_folder: Path, source_info: S3File, compare_info: S3File, records: int, chunksize: int) -> None:
+    if use_prev:
+        all_samples = s3.most_recent(data_dir)
+        if all_samples:
+            latest = all_samples[0]
+            print(f"Using most recent file in s3 {latest}")
+            return latest
+
+    athena = AthenaManager()
+    output_name = athena.query(query, s3.uri_from_path(data_dir))
+    return DataSample(f"{data_dir}/{output_name}", mappings) if output_name else DataSample()
+
+def retrieve(local_folder: Path, sample_path: str, env: Env, sample_params: SampleParams, use_prev: bool = False) -> str:
+    if use_prev:
+        s3 = S3Manager()
+        fm = FileManager()
+
+        for file_path in s3.most_recent(s3.full_path(env.name.lower())):
+            records = fm.get_records(file_path)
+            if records == 0 or records >= sample_params.records:
+                print(f"Using most recent file in s3 {file_path}")
+                return file_path
+
+    return sample(local_folder, sample_path, env, sample_params)
+
+def sample(local_folder: Path, sample_path: str, env: Env, sample_params: SampleParams) -> str: 
+    fm = FileManager(local_folder)
+    s3 = S3Manager()
+    nm = NamesMatching(env, sample_params.method, sample_params.workers, sample_params.headers)
+
+    local_sample_path = fm.local_path("sample.csv")
+    if local_sample_path.exists():
+        print(f"Using local file: {local_sample_path}")
+    else:
+        s3.download(sample_path, local_sample_path)
+
+    output_file_path = fm.create_local_path(env.name.lower(), records=sample_params.records, prefix_timestamp=True)
+    if output_file_path.exists():
+        fm.delete_paths(output_file_path)
+
+    nm.run_file(local_sample_path, output_file_path, rows=sample_params.records, chunksize=sample_params.chunksize)
+
+    upload_location = s3.full_path(env.name.lower(), output_file_path.name)
+    s3.upload(output_file_path, upload_location)
+    return upload_location
+
+def compare(local_folder: Path, s3_source_path: str, s3_compare_path: str, records: int, chunksize: int) -> None:
     import pandas as pd
 
     fm = FileManager(local_folder)
+    s3 = S3Manager()
 
-    def get_s3(type: str, info: S3File) -> Path:
-        local_path = Path(info.local_path)
+    def get_s3(type: str, s3_path: str) -> Path:
+        local_path = fm.local_path(s3_path.rsplit("/", 1)[-1])
 
-        if not local_path.exists():
-            return fm.download(info.s3_path, local_path)
+        if local_path.exists():
+            print(f"Local file for {s3_path} already exists at {local_path}, using as {type} file")
+        else:
+            s3.download(s3_path, local_path)
 
-        print(f"Local file for {info.local_path} already exists at {local_path}, using as {type} file")
         return local_path
 
-    source_path = get_s3("source", source_info)
-    compare_path = get_s3("compare", compare_info)
-    s3_folder = f"{source_path.stem}+{compare_path.stem}"
+    source_path = get_s3("source", s3_source_path)
+    compare_path = get_s3("compare", s3_compare_path)
 
     read_kwargs = {
         "dtype": str,
@@ -268,7 +318,7 @@ def compare(local_folder: Path, source_info: S3File, compare_info: S3File, recor
     issues_len = 0
     source_len = 0
 
-    diffs_path = fm.local_path(f"{fm.timestamp()}_diffs.csv")
+    diffs_path = fm.create_local_path("diffs", prefix_timestamp=True)
     diff_data: dict[str, dict[str, int]] = {}
 
     iterator: zip[tuple[pd.DataFrame, pd.DataFrame]] = zip(pd.read_csv(source_path, **read_kwargs), pd.read_csv(compare_path, **read_kwargs))
@@ -311,41 +361,30 @@ def compare(local_folder: Path, source_info: S3File, compare_info: S3File, recor
     if issues_len == 0:
         print(f"Output from test matches output from prod")
 
-    fm.upload(diffs_path, fm.join_path_parts(s3_output_dir, "comparison", s3_folder, diffs_path.name))
+    upload_path = s3.full_path(S3Folder.COMP, f"{source_path.stem}+{compare_path.stem}", diffs_path.name)
+    s3.upload(diffs_path, upload_path)
 
-def main(records: int, chunksize: int, workers: int, use_get: bool, use_sample: bool, use_prod: bool, use_test: bool) -> None:
-    if workers < 1:
-        print("Clamping workers to minimum value of 1")
-        workers = 1
-
-    if records < 0:
-        print("Claming records to minimum value of 0")
-        records = 0
-
-    if chunksize < 0:
-        print("Clamping chunksize to minimum value of 0")
-        chunksize = 0
-
-    method = Method.GET if use_get else Method.POST
-
+def main(sample_params: SampleParams, use_sample: bool, use_prod: bool, use_test: bool) -> None:
     data_folder = Path(__file__).parents[1] / "data"
-    sample_params = SampleParams(method, workers, records, chunksize)
 
     # Get sample file
-    data_sample = get_test_data(data_folder, use_sample)
+    s3_data_sample = get_test_data(use_sample)
+    if not s3_data_sample:
+        print("Error getting sample data")
+        return
 
     # Get prod results
-    prod_info = retrieve(data_folder, data_sample, Env.PROD, sample_params, use_prev=use_prod)
+    s3_prod_file = retrieve(data_folder, s3_data_sample, Env.PROD, sample_params, use_prev=use_prod)
 
     # Get test results
-    test_info = retrieve(data_folder, data_sample, Env.TEST, sample_params, use_prev=use_test)
+    s3_test_file = retrieve(data_folder, s3_data_sample, Env.TEST, sample_params, use_prev=use_test)
 
     # Compare test and prod
-    compare(data_folder, prod_info, test_info, records, chunksize)
+    compare(data_folder, s3_prod_file, s3_test_file, sample_params.records, sample_params.chunksize)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate namesmatching in test with prod")
-    parser.add_argument("-r", "--records", type=int, default=0, help="Amount of records to test, 0 for all (default: %(default)s)")
+    parser.add_argument("records", type=int, help="Amount of records to test, 0 for all")
     parser.add_argument("-c", "--chunksize", type=int, default=100000, help="Chunksize to process in (default: %(default)s)")
     parser.add_argument("-w", "--workers", type=int, default=10, help="Amount of workers to run against names matching (default: %(default)s)")
     parser.add_argument("-g", "--useget", action="store_true", help="Use GET method for testing instead of default POST method")
@@ -354,4 +393,22 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--usetest", action="store_true", help="Usel latest test file with sufficient records instead og generating")
     args = parser.parse_args()
 
-    main(args.records, args.chunksize, args.workers, args.useget, args.usesample, args.useprod, args.usetest)
+    minimums = {
+        "workers": 1,
+        "records": 0,
+        "chunksize": 0
+    }
+
+    for key, value in minimums.items():
+        if getattr(args, key) < value:
+            print(f"Clamping {key} to minimum value of {value}")
+            setattr(args, key, value)
+
+    sample_params = SampleParams(
+        Method.GET if args.useget else Method.POST,
+        args.workers,
+        args.records,
+        args.chunksize
+    )
+
+    main(sample_params, args.usesample, args.useprod, args.usetest)

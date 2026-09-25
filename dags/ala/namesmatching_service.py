@@ -80,15 +80,14 @@ class NamesMatching:
         RetParam.ISSUES.value
     )
 
-    _default_prefix = "returned"
+    _prefix = "returned"
     _endpoint = "api/searchByClassification"
 
-    def __init__(self, env: Env = None, method: Method = None, max_workers: int = 10, headers: dict = None, prefix: str = ""):
-        self._env = env
-        self._method = method
-        self._max_workers = max_workers
-        self._headers = headers or {}
-        self._prefix = prefix or self._default_prefix
+    def __init__(self, env: Env = Env.TEST, method: Method = Method.POST, workers: int = 10, custom_headers: dict = None):
+        self.env = env
+        self.method = method
+        self.workers = workers
+        self.custom_headers = custom_headers or {}
 
         self._url: str = None
         self._session: requests.Session = None
@@ -103,33 +102,19 @@ class NamesMatching:
         return f"{self._prefix}_{value}"
 
     def _apply_prefix(self, key: str) -> str:
-        return self._get_prefix(key) if self._prefix and key not in self._exclude_prefix else key
+        return self._get_prefix(key) if key not in self._exclude_prefix else key
         
     @staticmethod
     def start_session(func: callable) -> callable:
         def wrapper(self, *args, **kwargs) -> any:
             if self._session is None:
                 session = requests.Session()
-                session.headers.update({"accept": "application/json"} | self._headers)
+                session.headers.update({"accept": "application/json"} | self.custom_headers)
                 retry_settings = Retry(total=5, backoff_factor=0.2)
-                adapter = HTTPAdapter(pool_connections=self._max_workers, pool_maxsize=self._max_workers, max_retries=retry_settings)
+                adapter = HTTPAdapter(pool_connections=self.workers, pool_maxsize=self.workers, max_retries=retry_settings)
                 session.mount("https://", adapter)
 
                 self._session = session
-
-            return func(self, *args, **kwargs)
-        return wrapper
-
-    @staticmethod
-    def update_args(func: callable) -> callable:
-        def wrapper(self, *args, **kwargs) -> any:
-            self._env = kwargs.pop("env", self._env)
-            assert isinstance(self._env, Env), f"Invalid environment '{self._env}', should be Env Enum."
-
-            self._method = kwargs.pop("method", self._method)
-            assert isinstance(self._method, Method), f"Invalid method '{self._method}', should be Method Enum."
-
-            self._url = urljoin(self._env.value, self._endpoint)
 
             return func(self, *args, **kwargs)
         return wrapper
@@ -138,12 +123,17 @@ class NamesMatching:
         # Set retrieve method info and index value
         ret_val = {
             RetParam._IDX.value: idx,
-            RetParam.METHOD.value: self._method.value.lower(),
+            RetParam.METHOD.value: self.method.value.lower(),
             RetParam.PARAMS.value: params
         }
 
-        # Post parameters and check repsonse
-        response = self._session.post(self._url, json=params) if self._method == Method.POST else self._session.get(self.url, params=params)
+        def get_response() -> requests.Response:
+            if self.method == Method.POST:
+                return self._session.post(self.env.value, json=params)
+            return self._session.get(self.env.value, params=params)
+
+        # Submit parameters and check repsonse
+        response = get_response()
         if response.status_code != 200:
             return ret_val | {RetParam.SUCCESS.value: False, RetParam.ISSUES.value: [f"{response.status_code} ({response.reason}): {response.json()['message']}"]}
 
@@ -163,21 +153,19 @@ class NamesMatching:
         # Prefix keys if required
         return ret_val | {self._apply_prefix(key): value for key, value in data.items()}
 
-    @update_args
     @start_session
     def run_single(self, params: dict[str, str]) -> dict:
         ret_val = self._collect(params)
         ret_val.pop(RetParam._IDX.value)
         return ret_val
 
-    @update_args
     @start_session
     def run_series(self, series: pd.Series) -> pd.DataFrame:
         import pandas as pd
 
         records = []
 
-        with cf.ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+        with cf.ThreadPoolExecutor(max_workers=self.workers) as executor:
             futures = (executor.submit(self._collect, params, idx) for idx, params in series.items())
 
             for future in cf.as_completed(futures):
@@ -185,18 +173,17 @@ class NamesMatching:
 
         return pd.DataFrame.from_records(records, index=RetParam._IDX.value).convert_dtypes()
 
-    @update_args
     def run_df(self, df: pd.DataFrame) -> pd.DataFrame:
         valid_df_columns = df.columns.intersection([item.value for item in Param])
         param_series = df[valid_df_columns].apply(lambda row: {k: v for k, v in row.dropna().items() if v != ""}, axis=1)
         return self.run_series(param_series)
 
-    @update_args
     def process_df(self, df: pd.DataFrame, mappings: dict[Param, str] = {}) -> pd.DataFrame:
-        df = df.rename(columns={value: key.value for key, value in mappings.items()})
+        if mappings:
+            df = df.rename(columns={value: key.value for key, value in mappings.items()})
+
         return self.run_df(df).sort_index()
 
-    @update_args
     def run_file(self, input_path: Path, output_path: Path, mappings: dict[Param, str] = {}, rows: int = 0, chunksize: int = 0) -> None:
         import pandas as pd
 
@@ -208,7 +195,7 @@ class NamesMatching:
             "iterator": chunksize == 0
         }
 
-        print(f"Running name matching in '{self._env.name.lower()}' on {records_name} records using {self._method.name} method with {self._max_workers} workers")
+        print(f"Running name matching in '{self.env}' on {records_name} records using {self.method} method with {self._max_workers} workers")
 
         total_timer = _TimeKeeper()
         for idx, df in enumerate(pd.read_csv(input_path, **read_kwargs), start=1):
