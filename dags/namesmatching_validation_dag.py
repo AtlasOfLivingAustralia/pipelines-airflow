@@ -24,7 +24,7 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
         if s3_sample_path is None:
             raise AirflowException("Unable to find or generate a sample file for testing")
         
-        return s3_data_sample
+        return s3_sample_path
 
     def create_retrieve_task_group(local_folder: Path, s3_data_sample: str, env: Env, sample_params: nmcli.SampleParams, use_latest: bool):
         group_id = env.name.lower()

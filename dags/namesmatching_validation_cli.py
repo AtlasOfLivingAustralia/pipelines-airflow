@@ -247,6 +247,10 @@ class FileManager:
 
     @staticmethod
     def clear_folder(folder_path: Path, delete_folder: bool = False) -> None:
+        if not folder_path.exists():
+            print(f"Folder {folder_path} does not exist")
+            return
+
         for item in folder_path.iterdir():
             if item.is_file():
                 FileManager.delete_paths(item)
