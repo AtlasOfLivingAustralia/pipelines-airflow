@@ -2,7 +2,7 @@ from pathlib import Path
 from datetime import datetime
 import boto3
 import argparse
-from ala.namesmatching_service import Method, Param, Env, NamesMatching, RetParam
+from ala.namesmatching_service import Method, Param, Env, NamesMatching
 from dataclasses import dataclass, field
 import time
 from enum import StrEnum
@@ -325,7 +325,7 @@ def retrieve(local_folder: Path, sample_path: str, env: Env, sample_params: Samp
     return check_previous_nm_data(env, sample_params.records, use_prev) or \
         sample(local_folder, sample_path, env, sample_params)
 
-def sample(local_folder: Path, sample_path: str, env: Env, sample_params: SampleParams) -> str: 
+def sample(local_folder: Path, sample_path: str, env: Env, sample_params: SampleParams) -> str:
     fm = FileManager(local_folder)
     s3 = S3Manager()
     nm = NamesMatching(env, sample_params.method, sample_params.workers, sample_params.headers)
@@ -408,7 +408,7 @@ def compare(local_folder: Path, s3_source_path: str, s3_compare_path: str, recor
     upload_path = s3.full_path(S3Folder.COMP, f"{source_path.stem}+{compare_path.stem}", diffs_path.name)
     s3.upload(diffs_path, upload_path)
 
-def main(sample_params: SampleParams, generate_sample: bool, use_prod: bool, use_test: bool) -> None:
+def main(sample_params: SampleParams, generate_sample: bool, prev_prod: bool, prev_test: bool) -> None:
     data_folder = Path(__file__).parents[1] / "data"
 
     # Get sample file
@@ -418,10 +418,10 @@ def main(sample_params: SampleParams, generate_sample: bool, use_prod: bool, use
         return
 
     # Get prod results
-    s3_prod_file = retrieve(data_folder, s3_data_sample, Env.PROD, sample_params, use_prev=use_prod)
+    s3_prod_file = retrieve(data_folder, s3_data_sample, Env.PROD, sample_params, prev_prod)
 
     # Get test results
-    s3_test_file = retrieve(data_folder, s3_data_sample, Env.TEST, sample_params, use_prev=use_test)
+    s3_test_file = retrieve(data_folder, s3_data_sample, Env.TEST, sample_params, prev_test)
 
     # Compare test and prod
     compare(data_folder, s3_prod_file, s3_test_file, sample_params.records, sample_params.chunksize)
@@ -431,10 +431,10 @@ if __name__ == "__main__":
     parser.add_argument("records", type=int, help="Amount of records to test, 0 for all")
     parser.add_argument("-c", "--chunksize", type=int, default=100000, help="Chunksize to process in (default: %(default)s)")
     parser.add_argument("-w", "--workers", type=int, default=10, help="Amount of workers to run against names matching (default: %(default)s)")
-    parser.add_argument("-g", "--useget", action="store_true", help="Use GET method for testing instead of default POST method")
+    parser.add_argument("-g", "--get", action="store_true", help="Use GET method for testing instead of default POST method")
     parser.add_argument("-s", "--gensample", action="store_true", help="Generate sample file again instead of using latest")
-    parser.add_argument("-p", "--useprod", action="store_true", help="Use latest prod file with sufficient records instead of generating")
-    parser.add_argument("-t", "--usetest", action="store_true", help="Usel latest test file with sufficient records instead og generating")
+    parser.add_argument("-p", "--prevprod", action="store_true", help="Use latest prod file with sufficient records instead of generating")
+    parser.add_argument("-t", "--prevtest", action="store_true", help="Use latest test file with sufficient records instead og generating")
     args = parser.parse_args()
 
     minimums = {
@@ -449,10 +449,10 @@ if __name__ == "__main__":
             setattr(args, key, value)
 
     sample_params = SampleParams(
-        Method.GET if args.useget else Method.POST,
+        Method.GET if args.get else Method.POST,
         args.workers,
         args.records,
         args.chunksize
     )
 
-    main(sample_params, args.gensample, args.useprod, args.usetest)
+    main(sample_params, args.gensample, args.prevprod, args.prevtest)
