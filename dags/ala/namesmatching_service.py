@@ -63,10 +63,9 @@ class RetParam(StrEnum):
 
 class Env(Enum):
     TEST = "https://namematching-ws.test.ala.org.au"
-    PROD = "https://namematching-ws-turbo.ala.org.au"
-    STAGING = "https://namematching-staging-ws.ala.org.au"
+    PROD = "https://namematching-ws.ala.org.au"
 
-class Method(Enum):
+class Method(StrEnum):
     POST = "POST"
     GET = "GET"
 
@@ -82,14 +81,18 @@ class NamesMatching:
 
     _prefix = "returned"
     _endpoint = "api/searchByClassification"
+    _headers = {
+        "Content-Type": "application/json",
+        "accept": "application/json"
+    }
 
     def __init__(self, env: Env = Env.TEST, method: Method = Method.POST, workers: int = 10, custom_headers: dict = None):
         self.env = env
         self.method = method
         self.workers = workers
-        self.custom_headers = custom_headers or {}
+        self.headers = self._headers | (custom_headers or {})
 
-        self._url: str = None
+        self._url: str = urljoin(env.value, self._endpoint)
         self._session: requests.Session = None
 
     def get_returned_name(self, param: RetParam) -> str:
@@ -109,7 +112,7 @@ class NamesMatching:
         def wrapper(self, *args, **kwargs) -> any:
             if self._session is None:
                 session = requests.Session()
-                session.headers.update({"accept": "application/json"} | self.custom_headers)
+                session.headers.update(self.headers)
                 retry_settings = Retry(total=5, backoff_factor=0.2)
                 adapter = HTTPAdapter(pool_connections=self.workers, pool_maxsize=self.workers, max_retries=retry_settings)
                 session.mount("https://", adapter)
@@ -129,8 +132,8 @@ class NamesMatching:
 
         def get_response() -> requests.Response:
             if self.method == Method.POST:
-                return self._session.post(self.env.value, json=params)
-            return self._session.get(self.env.value, params=params)
+                return self._session.post(self._url, json=params)
+            return self._session.get(self._url, params=params)
 
         # Submit parameters and check repsonse
         response = get_response()
@@ -142,9 +145,6 @@ class NamesMatching:
             data: dict = response.json()
         except requests.exceptions.JSONDecodeError:
             return ret_val | {RetParam.SUCCESS.value: False, RetParam.ISSUES.value: ["Issue decoding JSON"]}
-
-        # Convert success to boolean values
-        data[RetParam.SUCCESS.value] = data[RetParam.SUCCESS.value] == "TRUE"
 
         # Update noIssue for a failed match to noMatch
         if not data[RetParam.SUCCESS.value] and data[RetParam.ISSUES.value] == ["noIssue"]:
@@ -171,18 +171,15 @@ class NamesMatching:
             for future in cf.as_completed(futures):
                 records.append(future.result())
 
-        return pd.DataFrame.from_records(records, index=RetParam._IDX.value).convert_dtypes()
+        return pd.DataFrame.from_records(records, index=RetParam._IDX.value).convert_dtypes().sort_index()
 
-    def run_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        valid_df_columns = df.columns.intersection([item.value for item in Param])
-        param_series = df[valid_df_columns].apply(lambda row: {k: v for k, v in row.dropna().items() if v != ""}, axis=1)
-        return self.run_series(param_series)
-
-    def process_df(self, df: pd.DataFrame, mappings: dict[Param, str] = {}) -> pd.DataFrame:
+    def run_df(self, df: pd.DataFrame, mappings: dict[Param, str] = {}) -> pd.DataFrame:
         if mappings:
             df = df.rename(columns={value: key.value for key, value in mappings.items()})
 
-        return self.run_df(df).sort_index()
+        valid_df_columns = df.columns.intersection([item.value for item in Param])
+        param_series = df[valid_df_columns].apply(lambda row: {k: v for k, v in row.dropna().items() if v != ""}, axis=1)
+        return self.run_series(param_series)
 
     def run_file(self, input_path: Path, output_path: Path, mappings: dict[Param, str] = {}, rows: int = 0, chunksize: int = 0) -> None:
         import pandas as pd
@@ -192,15 +189,16 @@ class NamesMatching:
             "keep_default_na": False,
             "nrows": rows or None,
             "chunksize": chunksize or None,
-            "iterator": chunksize == 0
+            "iterator": chunksize == 0,
+            "dtype": str
         }
 
-        print(f"Running name matching in '{self.env}' on {records_name} records using {self.method} method with {self._max_workers} workers")
+        print(f"Running name matching in '{self.env.name}' on {records_name} records using {self.method} method with {self.workers} workers")
 
         total_timer = _TimeKeeper()
         for idx, df in enumerate(pd.read_csv(input_path, **read_kwargs), start=1):
             chunk_timer = _TimeKeeper()
-            df = self.process_df(df, mappings)
+            df = self.run_df(df, mappings)
 
             # Reorder columns to align properly on subsequent writes
             if idx == 1:

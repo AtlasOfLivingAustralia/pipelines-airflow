@@ -7,41 +7,55 @@ from dataclasses import dataclass, field
 import time
 from enum import StrEnum
 
-query = "Select distinct raw_scientificName as rawScientificName, raw_kingdom as rawKingdom,\
- raw_phylum as rawPhylum, raw_class as rawClass, raw_order as rawOrder, raw_family as rawFamily,\
- raw_genus as rawGenus, raw_specificepithet as rawSpecificEpithet, raw_infraspecificepithet as rawInfraspecificEpithet,\
- verbatimtaxonrank as verbatimtaxonrank, specificepithet, infraspecificepithet, raw_species as rawSpecies,\
- matchtype as matchType, scientificName, taxonconceptid, raw_vernacularname as rawvernacularname,\
- raw_scientificnameauthorship as rawscientificnameauthorship, taxonid as rawtaxonid from taxon t,\
- additional a where t.id_prefix=a.id_prefix and t.dataresourceuid = a.dataresourceuid and t.id = a.id"
+dr_uids_key = "drUids"
 
-mappings = {
-    Param.KINGDOM: "rawkingdom",
-    Param.PHYLUM: "rawphylum",
-    Param.CLASS: "rawclass",
-    Param.ORDER: "raworder",
-    Param.FAMILY: "rawfamily",
-    Param.GENUS: "rawgenus",
-    Param.S_EPITHET: "rawspecificepithet",
-    Param.I_EPITHET: "rawinfraspecificepithet",
-    Param.RANK: "rawtaxonrank",
-    Param.VERB_RANK: "verbatimtaxonrank",
-    Param.AUTHORSHIP: "rawscientificnameauthorship",
-    Param.SCI_NAME: "rawscientificname",
-    Param.VERN_NAME: "rawvernacularname",
-    Param.TAXON_ID: "rawtaxonid"
-}
+query = f"""SELECT raw_scientificName AS {Param.SCI_NAME},
+    raw_kingdom AS {Param.KINGDOM},
+    raw_phylum AS {Param.PHYLUM},
+    raw_class AS {Param.CLASS},
+    raw_order AS "{Param.ORDER}",
+    raw_family AS {Param.FAMILY},
+    raw_genus AS {Param.GENUS},
+    verbatimtaxonrank AS {Param.VERB_RANK},
+    specificepithet AS {Param.S_EPITHET},
+    infraspecificepithet AS {Param.I_EPITHET},
+    raw_species AS expectedSpecies,
+    matchtype AS expectedMatchType,
+    scientificName AS expectedScientificName,
+    taxonconceptid AS expectedTaxonConceptId,
+    raw_vernacularname AS {Param.VERN_NAME},
+    raw_scientificnameauthorship AS {Param.AUTHORSHIP},
+    taxonid AS {Param.TAXON_ID},
+    ARRAY_JOIN(ARRAY_AGG(DISTINCT t.dataresourceuid), ',') AS {dr_uids_key}
+FROM taxon t
+    JOIN additional a ON t.id_prefix = a.id_prefix
+    AND t.dataresourceuid = a.dataresourceuid
+    AND t.id = a.id
+GROUP BY raw_scientificName,
+    raw_kingdom,
+    raw_phylum,
+    raw_class,
+    raw_order,
+    raw_family,
+    raw_genus,
+    raw_specificepithet,
+    raw_infraspecificepithet,
+    verbatimtaxonrank,
+    specificepithet,
+    infraspecificepithet,
+    raw_species,
+    matchtype,
+    scientificName,
+    taxonconceptid,
+    raw_vernacularname,
+    raw_scientificnameauthorship,
+    taxonid;"""
 
 class S3Folder(StrEnum):
     SAMPLES = "samples"
     PROD = "prod"
     TEST = "test"
     COMP = "comparison"
-
-@dataclass
-class DataSample:
-    s3_full_path: str
-    mappings: dict = field(default_factory=dict)
 
 @dataclass
 class SampleParams:
@@ -105,10 +119,10 @@ class S3Manager(AWSManager):
         response = self._client.list_objects_v2(Bucket=self.bucket, Prefix=full_path)
         contents = response["Contents"]
 
-        if sort_by is None:
-            return [item[self.Property.KEY] for item in contents]
+        if sort_by:
+            contents = sorted(contents, key=lambda x: x[sort_by.value], reverse=descending)
 
-        return [item[self.Property.KEY] for item in sorted(response["Contents"], key=lambda x: x[sort_by.value], reverse=descending)]
+        return [item[self.Property.KEY] for item in contents if not item[self.Property.KEY].endswith("/")]
 
     @AWSManager.requires_client
     def download(self, full_path: str, local_path: Path) -> None:
@@ -126,6 +140,17 @@ class S3Manager(AWSManager):
        self._client.copy_object(Bucket=self.bucket, Key=to_full_path, CopySource={"Bucket": self.bucket, "Key": from_full_path})
        self._client.delete_object(Bucket=self.bucket, Key=from_full_path)
 
+    @AWSManager.requires_client
+    def rename(self, full_path: str, name: str) -> str:
+        new_path = full_path.rsplit("/", 1)[0] + f"/{name}"
+        self.move(full_path, new_path)
+        return new_path
+
+    @AWSManager.requires_client
+    def delete(self, full_path: str) -> None:
+        print(f"Deleting file {self.uri_from_path(full_path)}")
+        self._client.delete_object(Bucket=self.bucket, Key=full_path)
+
 class AthenaManager(AWSManager):
 
     region = "ap-southeast-2"
@@ -140,8 +165,8 @@ class AthenaManager(AWSManager):
     def __init__(self):
         super().__init__(self.Module.ATHENA)
 
-        self._update_interval = 0.5
-        self._updates_recheck = 20
+        self._recheck_delay = 5
+        self._updates_per_second = 4
 
     def _poll(self, query_id: str) -> tuple[bool, str]:
         _at = -1
@@ -149,19 +174,34 @@ class AthenaManager(AWSManager):
 
         while True:
             response = self._client.get_query_execution(QueryExecutionId=query_id)
-            state = response['QueryExecution']['Status']['State']
+            state = response["QueryExecution"]["Status"]["State"]
 
             if state in self.State._value2member_map_:
                 print() # Skip to line after poll text
-                return state == self.State.SUCCESS, response['QueryExecution']['Status'].get('StateChangeReason', 'Unknown error')
+                return state == self.State.SUCCESS, response["QueryExecution"]["Status"].get("StateChangeReason", "Unknown error")
+
+            seconds = response["QueryExecution"]["Statistics"].get("TotalExecutionTimeInMillis", 0) / 1000
+            duration = f"{int(seconds // 3600):02}:{int(seconds // 60) % 60:02}:{seconds % 60:05.2f}"
+
+            bytes = response["QueryExecution"]["Statistics"].get("DataScannedInBytes", 0)
+            size = next(f"{bytes / (1024**idx):.02f}{prefix}B" for idx, prefix in enumerate(("", "K", "M", "G", "T")) if (bytes >> (10 * idx)) < 1024)
 
             # Wait for next poll
-            for _ in range(self._updates_recheck):
-                print(f"Running Query ({_cycle[_at := (_at + 1) % len(_cycle)]})", end="\r")
-                time.sleep(self._update_interval)
+            for _ in range(self._recheck_delay):
+                try:
+                    print(f"> Running Query ({_cycle[_at := (_at + 1) % len(_cycle)]}): Total time: {duration} | Data Scanned: {size}", end="\r")
+                    time.sleep(1 / self._updates_per_second)
+
+                except KeyboardInterrupt:
+                    response = self._client.stop_query_execution(QueryExecutionId=query_id)
+                    print()
+                    
+                    if response["ResponseMetadata"]["HTTPStatusCode"] == 200:
+                        return False, "Successfully cancelled by user"
+                    return False, "Cancelled by user, query did not stop"
 
     @AWSManager.requires_client
-    def query(self, query: str, output_uri: str) -> str:
+    def query(self, query: str, output_uri: str) -> str | None:
         response = self._client.start_query_execution(
             QueryString=query,
             QueryExecutionContext={
@@ -172,7 +212,7 @@ class AthenaManager(AWSManager):
             }
         )
 
-        query_id = response['QueryExecutionId']
+        query_id = response["QueryExecutionId"]
         output_file = f"{output_uri.rstrip('/')}/{query_id}.csv"
         print(f"Query started, execution ID: {query_id}")
 
@@ -184,7 +224,6 @@ class AthenaManager(AWSManager):
         
         print(f"Query failed")
         print(f"Reason: {reason}")
-        return ""
 
 class FileManager:
 
@@ -218,65 +257,80 @@ class FileManager:
             print(f"Cleaned up folder: {folder_path}")
             folder_path.rmdir()
 
-    def timestamp(self) -> str:
-        return datetime.now().strftime(f"%Y-%m-%d{self.file_name_part_char}%H%M%S")
+    @staticmethod
+    def timestamp() -> str:
+        return datetime.now().strftime(f"%Y-%m-%d{FileManager.file_name_part_char}%H%M%S")
 
     def create_local_path(self, core: str, suffix: str = "csv", records: int = -1, prefix_timestamp: bool = False) -> Path:
         parts = [core]
 
         if records >= 0:
-            parts.append(records)
+            parts.append(str(records))
 
         if prefix_timestamp:
             parts.insert(0, self.timestamp())
 
         return self.local_path(f"{self.file_name_part_char.join(parts)}.{suffix}")
 
-    def get_records(self, file_name: str) -> int:
-        record_component = file_name.rsplit(self.file_name_part_char, 1)[-1].split(".")[0]
+    @staticmethod
+    def get_records(file_name: str) -> int:
+        record_component = file_name.rsplit(FileManager.file_name_part_char, 1)[-1].split(".")[0]
         if record_component.isnumeric():
             return int(record_component)
 
         return -1
-    
-def get_test_data(use_prev: bool) -> DataSample:
+
+def get_s3(fm: FileManager, s3: S3Manager, s3_path: str, file_usage: str) -> Path:
+    local_path = fm.local_path(s3_path.rsplit("/", 1)[-1])
+
+    if local_path.exists():
+        print(f"Local file for {s3_path} already exists at {local_path}, using as {file_usage} file")
+    else:
+        s3.download(s3_path, local_path)
+
+    return local_path
+
+def get_test_data(generate_sample: bool) -> str:
     s3 = S3Manager()
     data_dir = s3.full_path(S3Folder.SAMPLES)
 
-    if use_prev:
+    if not generate_sample:
         all_samples = s3.most_recent(data_dir)
         if all_samples:
             latest = all_samples[0]
             print(f"Using most recent file in s3 {latest}")
             return latest
 
+        print("No previous sample found in s3, generating...")
+
     athena = AthenaManager()
     output_name = athena.query(query, s3.uri_from_path(data_dir))
-    return DataSample(f"{data_dir}/{output_name}", mappings) if output_name else DataSample()
+    if output_name is None:
+        return
 
-def retrieve(local_folder: Path, sample_path: str, env: Env, sample_params: SampleParams, use_prev: bool = False) -> str:
+    output_name = f"{data_dir}/{output_name}"
+    s3.delete(f"{output_name}.metadata") # Delete generated metadata file
+    return s3.rename(output_name, f"{FileManager.timestamp()}_sample_data.csv") 
+
+def check_previous_nm_data(env: Env, min_records: int, use_prev: bool) -> str | None:
     if use_prev:
         s3 = S3Manager()
-        fm = FileManager()
-
         for file_path in s3.most_recent(s3.full_path(env.name.lower())):
-            records = fm.get_records(file_path)
-            if records == 0 or records >= sample_params.records:
+            file_records = FileManager.get_records(file_path)
+            if file_records == 0 or file_records >= min_records:
                 print(f"Using most recent file in s3 {file_path}")
                 return file_path
 
-    return sample(local_folder, sample_path, env, sample_params)
+def retrieve(local_folder: Path, sample_path: str, env: Env, sample_params: SampleParams, use_prev: bool = False) -> str:
+    return check_previous_nm_data(env, sample_params.records, use_prev) or \
+        sample(local_folder, sample_path, env, sample_params)
 
 def sample(local_folder: Path, sample_path: str, env: Env, sample_params: SampleParams) -> str: 
     fm = FileManager(local_folder)
     s3 = S3Manager()
     nm = NamesMatching(env, sample_params.method, sample_params.workers, sample_params.headers)
 
-    local_sample_path = fm.local_path("sample.csv")
-    if local_sample_path.exists():
-        print(f"Using local file: {local_sample_path}")
-    else:
-        s3.download(sample_path, local_sample_path)
+    local_sample_path = get_s3(fm, s3, sample_path, env.name.lower())
 
     output_file_path = fm.create_local_path(env.name.lower(), records=sample_params.records, prefix_timestamp=True)
     if output_file_path.exists():
@@ -294,18 +348,8 @@ def compare(local_folder: Path, s3_source_path: str, s3_compare_path: str, recor
     fm = FileManager(local_folder)
     s3 = S3Manager()
 
-    def get_s3(type: str, s3_path: str) -> Path:
-        local_path = fm.local_path(s3_path.rsplit("/", 1)[-1])
-
-        if local_path.exists():
-            print(f"Local file for {s3_path} already exists at {local_path}, using as {type} file")
-        else:
-            s3.download(s3_path, local_path)
-
-        return local_path
-
-    source_path = get_s3("source", s3_source_path)
-    compare_path = get_s3("compare", s3_compare_path)
+    source_path = get_s3(fm, s3, s3_source_path, "source")
+    compare_path = get_s3(fm, s3, s3_compare_path, "compare")
 
     read_kwargs = {
         "dtype": str,
@@ -364,11 +408,11 @@ def compare(local_folder: Path, s3_source_path: str, s3_compare_path: str, recor
     upload_path = s3.full_path(S3Folder.COMP, f"{source_path.stem}+{compare_path.stem}", diffs_path.name)
     s3.upload(diffs_path, upload_path)
 
-def main(sample_params: SampleParams, use_sample: bool, use_prod: bool, use_test: bool) -> None:
+def main(sample_params: SampleParams, generate_sample: bool, use_prod: bool, use_test: bool) -> None:
     data_folder = Path(__file__).parents[1] / "data"
 
     # Get sample file
-    s3_data_sample = get_test_data(use_sample)
+    s3_data_sample = get_test_data(generate_sample)
     if not s3_data_sample:
         print("Error getting sample data")
         return
@@ -388,7 +432,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--chunksize", type=int, default=100000, help="Chunksize to process in (default: %(default)s)")
     parser.add_argument("-w", "--workers", type=int, default=10, help="Amount of workers to run against names matching (default: %(default)s)")
     parser.add_argument("-g", "--useget", action="store_true", help="Use GET method for testing instead of default POST method")
-    parser.add_argument("-s", "--usesample", action="store_true", help="Use latest sample file instead of generating")
+    parser.add_argument("-s", "--gensample", action="store_true", help="Generate sample file again instead of using latest")
     parser.add_argument("-p", "--useprod", action="store_true", help="Use latest prod file with sufficient records instead of generating")
     parser.add_argument("-t", "--usetest", action="store_true", help="Usel latest test file with sufficient records instead og generating")
     args = parser.parse_args()
@@ -411,4 +455,4 @@ if __name__ == "__main__":
         args.chunksize
     )
 
-    main(sample_params, args.usesample, args.useprod, args.usetest)
+    main(sample_params, args.gensample, args.useprod, args.usetest)
