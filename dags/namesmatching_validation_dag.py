@@ -48,7 +48,7 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
 
             @task.virtualenv(requirements=["pandas"])
             def sample(local_folder: Path, data_sample: str, env: Env, sample_params: dict) -> str:
-                from namesmatching_validation_cli import sample, DataSample, SampleParams # Required to be run within virtual env
+                from namesmatching_validation_cli import sample, SampleParams # Required to be run within virtual env
                 return sample(local_folder, data_sample, env, SampleParams(**sample_params))
 
             @task(trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS)
