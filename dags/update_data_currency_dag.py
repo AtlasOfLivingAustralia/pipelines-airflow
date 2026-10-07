@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import requests
 from airflow.decorators import dag, task
 from airflow.exceptions import AirflowException
-from ala.ala_helper import get_default_args, update_registry_metadata
+from ala.ala_helper import get_default_args, PersistentRegistryUpdater
 from ala import ala_config
 
 def validate_response_payload(response: requests.Response) -> dict:
@@ -62,7 +62,10 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
         payload = validate_response_payload(response)
 
         collection_name = payload["aliases"][solr_alias]
-        collection_timestamp = datetime.fromisoformat(collection_name.split("-", 1)[-1])
+        log.info(f"Solr alias '{solr_alias}' points to collection: {collection_name}")
+
+        collection_name = collection_name.split("-", 1)[-1] # Remove 'biocache' from start of name
+        collection_timestamp = datetime.strptime(collection_name, "%Y-%m-%d-%H-%M")
         log.info(f"Got solr collection date: {collection_timestamp}")
 
         days_before_collection = ala_config.CURRENCY_UPDATE_DAYS_PRIOR
@@ -158,6 +161,8 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
         value_errors = []
         collectory_errors = []
 
+        pru = PersistentRegistryUpdater() 
+
         for dr_uid, value in updates.items():
             if value is None: # dr_uid not returned from solr
                 log.error(f"Error updating {dr_uid}, data resource not found in solr")
@@ -170,7 +175,7 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
                 continue
 
             try:
-                update_registry_metadata(dr_uid, {collectory_value: value})
+                pru.update_registry_metadata(dr_uid, {collectory_value: value})
                 log.info(f"Updated '{collectory_value}' for {dr_uid}: {value}")
             except Exception as e:
                 log.error(f"Error updating {collectory_value} for {dr_uid}: {e}")
@@ -180,12 +185,23 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
         def _item_str(item_list: list[str]) -> str:
             return '' if not item_list else (": " + ", ".join(item_list))
 
-        failed = sum(len(errors) for errors in [solr_errors, value_errors, collectory_errors])
+        failed_amount = sum(len(errors) for errors in [solr_errors, value_errors, collectory_errors])
+        success_amount = len(updates) - failed_amount
 
-        log.info(f"Successfully updated '{collectory_value}' for {len(updates) - failed} data resource(s) in collectory")
-        log.info(f"Failed to update {len(solr_errors)} data resource(s) as dr doesn't exist in solr{_item_str(solr_errors)}")
-        log.info(f"Failed to update {len(value_errors)} data resource(s) with no solr value{_item_str(value_errors)}")
-        log.info(f"Failed to update {len(collectory_errors)} data resource(s) due to collectory issue{_item_str(collectory_errors)}")
+        if success_amount:
+            log.info(f"Successfully updated '{collectory_value}' for {success_amount} data resource(s) in collectory")
+        
+        if solr_errors:
+            log.info(f"Failed to update {len(solr_errors)} data resource(s) as dr doesn't exist in solr{_item_str(solr_errors)}")
+        
+        if value_errors:
+            log.info(f"Failed to update {len(value_errors)} data resource(s) with no solr value{_item_str(value_errors)}")
+        
+        if collectory_errors:
+            log.info(f"Failed to update {len(collectory_errors)} data resource(s) due to collectory issue{_item_str(collectory_errors)}")
+
+        if failed_amount:
+            raise AirflowException(f"{failed_amount} total tasks failed to update")
 
     solr_ref_date = get_solr_reference_date(force_update)
     updates = get_solr_load_dates(datasetIDs, solr_ref_date)

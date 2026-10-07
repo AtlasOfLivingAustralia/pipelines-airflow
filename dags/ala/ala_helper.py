@@ -1075,7 +1075,7 @@ def get_metadata_as_json(resource):
         return {"error": str(e)}
 
 
-def update_registry_metadata(uid, metadata):
+def update_registry_metadata(uid: str, metadata: dict[str, str], auth_header: dict[str, str] = None):
     """
     Updates metadata for a dataset in the registry (Collectory) using the API key.
 
@@ -1096,7 +1096,17 @@ def update_registry_metadata(uid, metadata):
     return json_parse(
         ala_config.COLLECTORY_SERVER,
         resource_path,
-        headers=get_auth_header(ala_config.REGISTRY_USE_JWT),
+        headers=auth_header or get_auth_header(ala_config.REGISTRY_USE_JWT),
         method="POST",
         params=metadata,
     )
+
+class PersistentRegistryUpdater:
+    def __init__(self):
+        self._auth_header = None
+
+    def update_registry_metadata(self, uid: str, metadata: dict[str, str]):
+        if self._auth_header is None:
+            self._auth_header = get_auth_header(ala_config.REGISTRY_USE_JWT)
+
+        update_registry_metadata(uid, metadata, self._auth_header)
