@@ -126,7 +126,7 @@ class NamesMatching:
         # Set retrieve method info and index value
         ret_val = {
             RetParam._IDX.value: idx,
-            RetParam.METHOD.value: self.method.value.lower(),
+            RetParam.METHOD.value: self.method.lower(),
             RetParam.PARAMS.value: params
         }
 

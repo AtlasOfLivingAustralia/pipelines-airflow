@@ -33,7 +33,7 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
         def retrieve(local_folder: Path, data_sample: str, env: Env, sample_params: nmcli.SampleParams, use_latest: bool, group_id: str) -> str:
 
             @task(multiple_outputs=False)
-            def check_previous(env: Env, records: int, use_latest: bool) -> str | None:
+            def check_previous(env: Env, records: int, use_latest: bool) -> str:
                 res = nmcli.check_previous_nm_data(env, records, use_latest)
                 if res is not None:
                     print(f"Using previous file: {res}")
@@ -41,10 +41,11 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
                 
                 print("No valid previous file found")
                 print(f"Generating new '{env.name.lower()}' file with {records} records")
+                return ""
 
             @task.branch
-            def sample_if_empty(run_sampling: bool, group_id: str) -> str:
-                return f"{group_id}.sample" if run_sampling else f"{group_id}.resolve_output"
+            def sample_if_no_output(previous_file_name: str, group_id: str) -> str:
+                return f"{group_id}.resolve_output" if previous_file_name else f"{group_id}.sample"
 
             @task.virtualenv(requirements=["pandas"])
             def sample(local_folder: Path, data_sample: str, env: Env, sample_params: dict) -> str:
@@ -55,10 +56,10 @@ def validate_namesmatching(record_limit: int = 0, chunk_size: int = 100000, api_
             def resolve_output(previous_output: str | None, sampled_output: str) -> str:
                 return previous_output or sampled_output
 
-            previous = check_previous(env, sample_params.records, use_latest)
-            branch_decision = sample_if_empty(previous is None, group_id)
+            previous_file = check_previous(env, sample_params.records, use_latest)
+            branch_decision = sample_if_no_output(previous_file, group_id)
             sample_output = sample(local_folder, data_sample, env, asdict(sample_params))
-            final_output = resolve_output(previous, sample_output)
+            final_output = resolve_output(previous_file, sample_output)
 
             branch_decision >> final_output # Branch to output if previous isn't empty
             branch_decision >> sample_output # Branch to sample if no previous

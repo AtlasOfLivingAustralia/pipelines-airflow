@@ -334,7 +334,7 @@ def sample(local_folder: Path, sample_path: str, env: Env, sample_params: Sample
     s3 = S3Manager()
     nm = NamesMatching(env, sample_params.method, sample_params.workers, sample_params.headers)
 
-    local_sample_path = get_s3(fm, s3, sample_path, env.name.lower())
+    local_sample_path = get_s3(fm, s3, sample_path, "sample")
 
     output_file_path = fm.create_local_path(env.name.lower(), records=sample_params.records, prefix_timestamp=True)
     if output_file_path.exists():
