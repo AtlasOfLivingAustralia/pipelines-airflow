@@ -5,7 +5,7 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 
-from ala import ala_config, ala_helper, jwt_auth
+from ala import ala_config, ala_helper
 
 DAG_ID = "Update_gbif_metadata"
 
@@ -33,17 +33,9 @@ with DAG(
             HTTPError: If the HTTP request returned an unsuccessful status code.
         """
 
-        auth = jwt_auth.Authenticator(
-                ala_config.AUTH_TOKEN_URL,
-                ala_config.AUTH_CLIENT_ID,
-                ala_config.AUTH_CLIENT_SECRET,
-                ala_config.AUTH_SCOPE
-            )
-        jwt_token = auth.get_token()
-
         registry_url = kwargs["registry_url"]
         response = ala_helper.call_url(
-            ala_helper.join_url(registry_url, "/syncGBIF"), headers={"Authorization": f"Bearer {jwt_token}"}
+            ala_helper.join_url(registry_url, "/syncGBIF"), headers=ala_helper.get_auth_header(True)
         )
         print(f"content: {response.content}")
 
