@@ -9,7 +9,6 @@ from airflow.operators.python import get_current_context
 import logging
 
 from ala import ala_config, ala_helper
-from ala import jwt_auth as ja
 
 DAG_ID = "Assertions-Sync"
 
