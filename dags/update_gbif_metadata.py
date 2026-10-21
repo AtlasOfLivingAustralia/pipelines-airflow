@@ -27,7 +27,6 @@ with DAG(
         Updates GBIF metadata by making a request to the registry URL.
         Args:
             **kwargs: Arbitrary keyword arguments.
-                - ala_api_key (str): The API key for ALA.
                 - registry_url (str): The URL of the ALA registry.
         Raises:
             HTTPError: If the HTTP request returned an unsuccessful status code.
