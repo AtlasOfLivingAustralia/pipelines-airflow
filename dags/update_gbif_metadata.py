@@ -27,16 +27,14 @@ with DAG(
         Updates GBIF metadata by making a request to the registry URL.
         Args:
             **kwargs: Arbitrary keyword arguments.
-                - ala_api_key (str): The API key for ALA.
                 - registry_url (str): The URL of the ALA registry.
         Raises:
             HTTPError: If the HTTP request returned an unsuccessful status code.
         """
 
-        ala_api_key = kwargs["ala_api_key"]
         registry_url = kwargs["registry_url"]
         response = ala_helper.call_url(
-            ala_helper.join_url(registry_url, "/syncGBIF"), headers={"Authorization": ala_api_key}
+            ala_helper.join_url(registry_url, "/syncGBIF"), headers=ala_helper.get_auth_header(True)
         )
         print(f"content: {response.content}")
 
@@ -49,7 +47,7 @@ with DAG(
         update_gbif_metadata_op = PythonOperator(
             task_id="call_collectory",
             provide_context=True,
-            op_kwargs={"ala_api_key": ala_config.ALA_API_KEY, "registry_url": ala_config.COLLECTORY_SERVER},
+            op_kwargs={"registry_url": ala_config.COLLECTORY_SERVER},
             python_callable=update_gbif_metadata,
         )
         sync_s3_buckets_bash_op >> update_gbif_metadata_op >> ala_helper.get_success_notification_operator()

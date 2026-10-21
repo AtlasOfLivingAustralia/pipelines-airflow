@@ -9,7 +9,6 @@ from airflow.operators.python import get_current_context
 import logging
 
 from ala import ala_config, ala_helper
-from ala import jwt_auth as ja
 
 DAG_ID = "Assertions-Sync"
 
@@ -26,17 +25,14 @@ DAG_ID = "Assertions-Sync"
     catchup=False,
 )
 def taskflow():
-    @task
+    @task(multiple_outputs=False)
     def authenticate():
-        auth = ja.Authenticator(
-            ala_config.AUTH_TOKEN_URL, ala_config.AUTH_CLIENT_ID, ala_config.AUTH_CLIENT_SECRET, ala_config.AUTH_SCOPE
-        )
-        return auth.get_token()
+        return ala_helper.get_auth_header(True)
 
     @task
-    def call_api(jwt_token):
+    def call_api(auth_header):
 
-        headers = {"user-agent": "token-refresh/0.1.1", "Authorization": f"Bearer {jwt_token}"}
+        headers = {"user-agent": "token-refresh/0.1.1"} | auth_header
         context = get_current_context()
         pre_sync_count = int(context["params"]["pre_sync_count"])
 
