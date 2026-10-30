@@ -15,6 +15,7 @@ ALERT_EMAIL = Variable.get("alert_email")
 BIOCACHE_URL = Variable.get("biocache_url")
 BIOCACHE_WS = BIOCACHE_URL
 COLLECTORY_SERVER = Variable.get("registry_url")
+CURRENCY_UPDATE_DAYS_PRIOR = int(Variable.get("currency_update_days_prior"))
 DASHBOARD_CACHE_CLEAR_URL = Variable.get("dashboard_cache_clear_url")
 DOI_URL = Variable.get("doi_url")
 DR_REC_COUNT_THRESHOLD = int(Variable.get("dr_rec_count_threshold"))
