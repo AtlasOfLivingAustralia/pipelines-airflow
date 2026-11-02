@@ -70,7 +70,7 @@ def get_spark_steps(
         emr_python_step(
             "k. Add additional replicas",
             f"/tmp/create_solr_collection_cli.py -c {ala_config.SOLR_CONFIGSET} -s {ala_config.SOLR_URL} -r {ala_config.SOLR_REPLICATION_FACTOR}"
-            f" -a add_additional_replicas {solr_collection_name}",
+            f" -a add_additional_replicas --wait {solr_collection_name}",
         ),
         step_bash_cmd(
             "l. Clear S3 outlier ",
