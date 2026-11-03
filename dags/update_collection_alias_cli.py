@@ -7,18 +7,7 @@ import time
 import urllib.parse
 import urllib.request as request
 
-try:
-    from distutils.util import strtobool
-except ImportError:
-    # distutils is removed in Python 3.12+
-    def strtobool(val: str) -> bool:
-        """Lightweight fallback for distutils.util.strtobool."""
-        val_str = str(val).strip().lower()
-        if val_str in ("y", "yes", "t", "true", "on", "1"):
-            return True
-        elif val_str in ("n", "no", "f", "false", "off", "0"):
-            return False
-        raise ValueError(f"invalid truth value {val!r}")
+from ala.ala_helper import strtobool
 
 checks_available = [
     "check_total_count",
