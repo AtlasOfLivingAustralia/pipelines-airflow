@@ -6,10 +6,12 @@ import sys
 import time
 import urllib.parse
 import urllib.request as request
-from distutils.util import strtobool
+
+from ala.ala_helper import strtobool
 
 checks_available = [
     "check_total_count",
+    "check_replicas_active",
     "check_data_resources",
     "check_min_fields_for_random_records",
     "check_compare_random_records",
@@ -601,6 +603,85 @@ def check_representative_fields(**kwargs):
     return ResultStatus.PASS
 
 
+def check_replicas_active(solr_base=None, new_collection=None, **kwargs):
+    """Verifies that all shards and replicas in new_collection are active and on live nodes."""
+    parse_params(kwargs)
+    cluster = solr_base_new if solr_base_new else globals().get("solr_base", solr_base)
+    target_collection = globals().get("new_collection", new_collection)
+
+    print(f"INFO- Checking replica status for collection '{target_collection}' on cluster '{cluster}'...")
+    try:
+        result = json_parse(
+            "admin/collections",
+            {"action": "CLUSTERSTATUS", "collection": target_collection, "wt": "json"},
+            solr_cluster=cluster,
+        )
+    except Exception as e:
+        print(f"SEVERE- Failed to query CLUSTERSTATUS for collection '{target_collection}': {e}")
+        return ResultStatus.FAIL
+
+    if result is None:
+        print(f"SEVERE- Empty CLUSTERSTATUS response for collection '{target_collection}'")
+        return ResultStatus.FAIL
+
+    cluster_info = result.get("cluster", {})
+    collections = cluster_info.get("collections", {})
+    live_nodes = set(cluster_info.get("live_nodes", []))
+
+    if target_collection not in collections:
+        print(f"SEVERE- Collection '{target_collection}' not found in Solr cluster status")
+        return ResultStatus.FAIL
+
+    shards = collections[target_collection].get("shards", {})
+    if not shards:
+        print(f"SEVERE- No shards found for collection '{target_collection}'")
+        return ResultStatus.FAIL
+
+    all_healthy = True
+    inactive_details = []
+    total_replicas = 0
+    active_replicas = 0
+
+    for shard_name, shard_info in shards.items():
+        shard_state = shard_info.get("state")
+        if shard_state != "active":
+            all_healthy = False
+            inactive_details.append(f"Shard {shard_name} state='{shard_state}'")
+
+        replicas = shard_info.get("replicas", {})
+        if not replicas:
+            all_healthy = False
+            inactive_details.append(f"Shard {shard_name} has no replicas")
+
+        for rep_name, rep_info in replicas.items():
+            total_replicas += 1
+            rep_state = rep_info.get("state")
+            rep_node = rep_info.get("node_name")
+            node_live = rep_node in live_nodes
+
+            if rep_state == "active" and node_live:
+                active_replicas += 1
+            else:
+                all_healthy = False
+                reasons = []
+                if rep_state != "active":
+                    reasons.append(f"state='{rep_state}'")
+                if not node_live:
+                    reasons.append(f"node '{rep_node}' not in live_nodes")
+                inactive_details.append(f"Replica {rep_name} ({shard_name}): {', '.join(reasons)}")
+
+    print(
+        f"INFO- Replica status: {active_replicas}/{total_replicas} active across {len(shards)} shards for {target_collection}"
+    )
+
+    if not all_healthy:
+        print(f"SEVERE- Replica check failed for '{target_collection}': {'; '.join(inactive_details)}")
+        return ResultStatus.FAIL
+
+    print(f"PASS- All {total_replicas} replicas across {len(shards)} shards are active and healthy.")
+    return ResultStatus.PASS
+
+
 def switch_collection_alias(**kwargs):
     parse_params(kwargs)
     ret_status = ResultStatus.PASS
@@ -608,6 +689,12 @@ def switch_collection_alias(**kwargs):
         print(f"INFO- Switching collection alias is skipped as the run_checks_only param set to {run_checks_only}")
         ret_status = ResultStatus.SKIP
     else:
+        # Pre-switch safety check: Ensure all replicas are active before proceeding
+        replica_status = check_replicas_active()
+        if replica_status != ResultStatus.PASS:
+            print(f"SEVERE- Aborting alias switch: replicas are not active for collection '{new_collection}'")
+            return ResultStatus.FAIL
+
         # Rebalance leaders of the new collection before pointing the alias to it
         result = json_parse(
             "admin/collections",
