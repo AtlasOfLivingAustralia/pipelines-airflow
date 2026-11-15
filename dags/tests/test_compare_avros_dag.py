@@ -1,7 +1,7 @@
-
 import copy
 from airflow import DAG
 from airflow.decorators import task, task_group
+from airflow.models.param import Param
 from airflow.providers.amazon.aws.operators.emr import EmrCreateJobFlowOperator, EmrAddStepsOperator
 from airflow.providers.amazon.aws.sensors.emr import EmrJobFlowSensor
 from airflow.utils.dates import days_ago
@@ -16,6 +16,7 @@ DAG_ID = "Test_avros"
 PYSPARK_FILE = "compare_avros.py"
 PYSPARK_FILE_PATH = f"s3://{ala_config.S3_BUCKET}/airflow/dags/tests/{PYSPARK_FILE}"
 EMR_RELEASE = "emr-7.10.0"
+VALID_CLUSTER_SIZES = ["small", "large", "xlarge"]
 
 with (DAG(
         dag_id=DAG_ID,
@@ -29,14 +30,34 @@ with (DAG(
             "datasetId": "dr15085",
             "source_bucket": "s3://ala-databox-avro",
             "target_bucket": "s3://ala-databox-dev",
+            # Optional. Leave empty to size the cluster automatically from the dataset size.
+            # Set to one of small / large / xlarge to force that size for all datasets.
+            "cluster_size": Param(
+                "",
+                type="string",
+                enum=[""] + VALID_CLUSTER_SIZES,
+                description="Optional EMR cluster size override. Empty = determine from dataset size.",
+            ),
         },
 ) as dag):
 
     @task
     def get_dataset_emr_sizing(**kwargs) -> list[dict]:
-        bucket = kwargs["dag_run"].conf["source_bucket"]
-        datasets_param = kwargs["dag_run"].conf["datasetId"]
+        conf = kwargs["dag_run"].conf
+        bucket = conf["source_bucket"]
+        datasets_param = conf["datasetId"]
         dataset_list = datasets_param.split()
+
+        # If a cluster size is supplied, use it for every dataset and skip auto-sizing
+        cluster_size_override = (conf.get("cluster_size") or "").strip().lower()
+        if cluster_size_override:
+            if cluster_size_override not in VALID_CLUSTER_SIZES:
+                raise ValueError(
+                    f"Invalid cluster_size '{cluster_size_override}'. "
+                    f"Must be one of {VALID_CLUSTER_SIZES} or empty."
+                )
+            return [{"dr": dr, "size": cluster_size_override} for dr in dataset_list]
+
         small, large, xlarge = get_dataset_sizing_from_datasets(
             bucket=bucket, datasets_list=dataset_list, sort_desc=True
         )
