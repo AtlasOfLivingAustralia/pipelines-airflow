@@ -198,6 +198,9 @@ class EMRConfig:
             {"Key": "for-use-with-amazon-emr-managed-policies", "Value": "true"},
             {"Key": "component", "Value": "ingestion"},
             {"Key": "environment", "Value": get_environment()},
+            {"Key": "imt_patching", "Value": "none"},
+            {"Key": "Inspector", "Value": "Skip"},
+            {"Key": "Patch Group", "Value": "None"},
         ],
         init=False,
     )
