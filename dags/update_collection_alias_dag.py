@@ -13,6 +13,7 @@ DAG_ID = "Update-Collection-Alias"
 
 checks_available = [
     "check_total_count",
+    "check_replicas_active",
     "check_data_resources",
     "check_min_fields_for_random_records",
     "check_conservation_status",
@@ -81,6 +82,9 @@ with DAG(
 
     def check_compare_random_records(**kwargs):
         return check_function("check_compare_random_records", ucli.check_compare_random_records, **kwargs)
+
+    def check_replicas_active(**kwargs):
+        return check_function("check_replicas_active", ucli.check_replicas_active, **kwargs)
 
     def check_total_count(**kwargs):
         return check_function("check_total_count", ucli.check_total_count, **kwargs)
