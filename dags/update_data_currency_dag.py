@@ -120,14 +120,19 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
                 key = object["Key"]
                 _, dr_uid, filename = key.split("/", 2)
 
-                if filename != f"{dr_uid}.zip": # Only keep used file
+                # Only keep used file, no backups
+                if filename != f"{dr_uid}.zip": 
                     continue
 
-                timestamp = object["LastModified"]
+                # Apply uid filter if required
+                if filter_uid_list and dr_uid not in filter_uid_list:
+                    continue
+
+                timestamp: datetime = object["LastModified"]
                 local_timestamp = timestamp.astimezone(ZoneInfo("Australia/Sydney"))
 
                 if reference_timestamp is None or local_timestamp >= reference_timestamp:
-                    updates[dr_uid] = local_timestamp
+                    updates[dr_uid] = local_timestamp.isoformat()
 
         info_message = f"There are {len(updates)} data resources to update"
         if filter_uid_list:
