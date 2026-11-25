@@ -5,6 +5,8 @@ from airflow.decorators import dag, task
 from airflow.exceptions import AirflowException
 from ala.ala_helper import get_default_args, PersistentRegistryUpdater
 from ala import ala_config
+import boto3
+from zoneinfo import ZoneInfo
 
 def validate_response_payload(response: requests.Response) -> dict:
     try:
@@ -35,12 +37,12 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
     """
 
     # Data values
-    solr_facet = "lastLoadDate"
+    s3_bucket = ala_config.S3_BUCKET_DWCA
+    s3_folder = "dwca-imports/"
     collectory_value = "dataCurrency"
 
     # Request properties
     base_url = ala_config.SOLR_URL
-    solr_alias = ala_config.SOLR_COLLECTION
     request_headers = {
         "User-Agent": "dataCurrencyDAG"
     }
@@ -54,17 +56,21 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
         
         url = f"{base_url}/admin/collections"
         params = {
-            "action": "LISTALIASES"
+            "action": "LIST"
         }
 
         log.info(f"Getting solr date from {url}")
         response = requests.get(url, headers=request_headers, params=params, timeout=request_timeout)
         payload = validate_response_payload(response)
 
-        collection_name = payload["aliases"][solr_alias]
-        log.info(f"Solr alias '{solr_alias}' points to collection: {collection_name}")
+        collections = [collection for collection in payload.get("collections", []) if collection.startswith("biocache-")]
+        if not collections:
+            AirflowException(f"No collections found in solr")
 
-        collection_name = collection_name.split("-", 1)[-1] # Remove 'biocache' from start of name
+        oldest_collection = sorted(collections)[0] # Sorted by date, oldest first (sorted ascending order)
+        log.info(f"Using oldest collection available as reference date: {oldest_collection}")
+
+        collection_name = oldest_collection.split("-", 1)[-1] # Remove 'biocache' from start of name
         collection_timestamp = datetime.strptime(collection_name, "%Y-%m-%d-%H-%M")
         log.info(f"Got solr collection date: {collection_timestamp}")
 
@@ -75,7 +81,7 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
         return collection_timestamp.isoformat()
 
     @task(multiple_outputs=False, show_return_value_in_logs=False)
-    def get_solr_load_dates(datasetIDs: str, solr_reference_date: str | None) -> dict[str, str]:
+    def get_s3_upload_dates(datasetIDs: str, solr_reference_date: str) -> dict[str, str]:
 
         def sanitise_input() -> list[str]:
             if not isinstance(datasetIDs, str): # Airflow passes empty string as None
@@ -101,79 +107,43 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
             return filter_list
 
         filter_uid_list = sanitise_input()
+        reference_timestamp = datetime.fromisoformat(solr_reference_date) if solr_reference_date else None 
 
-        solr_bucket_name = "distinct_items"
-        url = f"{base_url}/{solr_alias}/select"
-        params = {
-            "query": "*:*",
-            "limit": 0,
-            "facet": {
-                solr_bucket_name: {
-                    "type": "terms",
-                    "field": "dataResourceUid",
-                    "limit": -1,
-                    "numBuckets": True,
-                    "facet": {solr_facet: f"max({solr_facet})"}
-                }
-            }
-        }
+        log.info(f"Getting all dwca-import files from s3://{s3_bucket}/{s3_folder}")
+        s3 = boto3.client("s3")
+        paginator = s3.get_paginator('list_objects_v2')
+        iterator = paginator.paginate(Bucket=s3_bucket, Prefix=s3_folder)
 
-        log.info(f"Querying solr at {url}")
-        response = requests.post(url, headers=request_headers, json=params, timeout=request_timeout)
-        payload = validate_response_payload(response)
-
-        payload = payload["facets"][solr_bucket_name] # Overwrite initial payload with just the returned bucket
-        log.info(f"Found {payload['numBuckets']} data resources in solr with facet '{solr_facet}'")
-
-        # Get required updates from payload
         updates = {}
-        for bucket in payload["buckets"]:
-            dr_uid = bucket["val"]
+        for page in iterator:
+            for object in page.get("Contents", []):
+                key = object["Key"]
+                _, dr_uid, filename = key.split("/", 2)
 
-            if filter_uid_list and (dr_uid not in filter_uid_list):
-                continue
+                if filename != f"{dr_uid}.zip": # Only keep used file
+                    continue
 
-            value = bucket.get(solr_facet, "")
-            if (
-                not value # Keep empty values to report errors later
-                or not solr_reference_date # Keep all values if no ref date
-                or datetime.fromisoformat(value) > datetime.fromisoformat(solr_reference_date) # Keep valid values
-            ):
-                updates[dr_uid] = value
+                timestamp = object["LastModified"]
+                local_timestamp = timestamp.astimezone(ZoneInfo("Australia/Sydney"))
 
-        # Put None in place of updates that aren't in solr to report errors later
-        for dr_uid in filter_uid_list:
-            if dr_uid not in updates:
-                updates[dr_uid] = None
+                if reference_timestamp is None or local_timestamp >= reference_timestamp:
+                    updates[dr_uid] = local_timestamp
 
         info_message = f"There are {len(updates)} data resources to update"
         if filter_uid_list:
             info_message += f" after applying data resource filter {filter_uid_list}"
-        if solr_reference_date:
-            info_message += f" with a date after {solr_reference_date}"
+        if reference_timestamp is not None:
+            info_message += f" with a date after {reference_timestamp}"
 
         log.info(info_message)
         return updates
 
     @task
     def update_collectory_data_currency(updates: dict) -> None:
-        solr_errors = []
-        value_errors = []
-        collectory_errors = []
-
         pru = PersistentRegistryUpdater() 
 
+        collectory_errors = []
         for dr_uid, value in updates.items():
-            if value is None: # dr_uid not returned from solr
-                log.error(f"Error updating {dr_uid}, data resource not found in solr")
-                solr_errors.append(dr_uid)
-                continue
-
-            if not value: # Value from solr was empty
-                log.warning(f"Skipping {collectory_value} update for {dr_uid}, solr value is empty")
-                value_errors.append(dr_uid)
-                continue
-
             try:
                 pru.update_registry_metadata(dr_uid, {collectory_value: value})
                 log.info(f"Updated '{collectory_value}' for {dr_uid}: {value}")
@@ -185,26 +155,18 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
         def _item_str(item_list: list[str]) -> str:
             return '' if not item_list else (": " + ", ".join(item_list))
 
-        failed_amount = sum(len(errors) for errors in [solr_errors, value_errors, collectory_errors])
-        success_amount = len(updates) - failed_amount
-
+        success_amount = len(updates) - len(collectory_errors)
         if success_amount:
             log.info(f"Successfully updated '{collectory_value}' for {success_amount} data resource(s) in collectory")
-        
-        if solr_errors:
-            log.info(f"Failed to update {len(solr_errors)} data resource(s) as dr doesn't exist in solr{_item_str(solr_errors)}")
-        
-        if value_errors:
-            log.info(f"Failed to update {len(value_errors)} data resource(s) with no solr value{_item_str(value_errors)}")
         
         if collectory_errors:
             log.info(f"Failed to update {len(collectory_errors)} data resource(s) due to collectory issue{_item_str(collectory_errors)}")
 
-        if failed_amount:
-            raise AirflowException(f"{failed_amount} total tasks failed to update")
+        if not success_amount and len(updates):
+            raise AirflowException("All tasks failed to update due to some collectory error")
 
     solr_ref_date = get_solr_reference_date(force_update)
-    updates = get_solr_load_dates(datasetIDs, solr_ref_date)
+    updates = get_s3_upload_dates(datasetIDs, solr_ref_date)
     update_collectory_data_currency(updates)
 
 update_data_currency_values()
