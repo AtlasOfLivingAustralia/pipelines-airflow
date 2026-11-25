@@ -397,6 +397,13 @@ with DAG(
         conf={"pre_sync_count": "{{ task_instance.xcom_pull(task_ids='asserted_records_count') }}"},
     )
 
+    update_data_currency_task = TriggerDagRunOperator(
+        task_id="update_data_currency_task",
+        trigger_dag_id="Update-Data-Currency",
+        wait_for_completion=True,
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
+    )
+
     update_gbif_task = TriggerDagRunOperator(
         task_id="update_gbif_task",
         trigger_dag_id="Update_gbif_metadata",
@@ -414,6 +421,6 @@ with DAG(
     (image_sync >> get_drs_for_image_sync_index >> check_image_sync_count >> [full_index_to_solr, image_sync_batch])
     image_sync_batch >> image_sync_batch_task_grp >> full_index_to_solr
     full_index_to_solr >> full_index_to_solr_task_grp
-    full_index_to_solr_task_grp >> assertion_sync >> clear_dashboard_cache
+    full_index_to_solr_task_grp >> update_data_currency_task >> assertion_sync >> clear_dashboard_cache
     full_index_to_solr_task_grp >> update_gbif_task
     [clear_dashboard_cache, update_gbif_task] >> ala_helper.get_success_notification_operator()
