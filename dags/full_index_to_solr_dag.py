@@ -40,16 +40,17 @@ def get_spark_steps(
         ),
         s3_cp(
             "c. Copy Sampling and IndexRecord from S3",
-            f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets",
-            "hdfs:///pipelines-all-datasets",
+            f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets/",
+            "hdfs:///pipelines-all-datasets/",
+            extra_args=["-Dmapreduce.job.reduces=64"],
         ),
         step_bash_cmd("d. Sampling pipeline", " la-pipelines sample all --cluster"),
         step_bash_cmd("e. JackKnife pipeline", " la-pipelines jackknife all --cluster"),
         step_bash_cmd("f. Clustering", " la-pipelines clustering all --cluster"),
         s3_cp(
             "g. Copy Outlier from S3",
-            f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-outlier",
-            "hdfs:///pipelines-outlier",
+            f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-outlier/",
+            "hdfs:///pipelines-outlier/",
             action_on_failure="CONTINUE",
         ),
         s3_cp(
@@ -123,6 +124,7 @@ with DAG(
         "includeOutlier": "true",
         "skipImageSync": "false",
         "time_range": (None, None),
+        "scalable_cluster": "default",
     },
 ) as dag:
 

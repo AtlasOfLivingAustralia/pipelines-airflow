@@ -394,7 +394,7 @@ def get_recent_images_drs(start_date: str, end_date: str = None):
     return {d: c for d, c in drs.items() if d != "no_dataresource"}
 
 
-def s3_cp(step_name, src, dest, action_on_failure="TERMINATE_CLUSTER"):
+def s3_cp(step_name, src, dest, action_on_failure="TERMINATE_CLUSTER", extra_args=None):
     """
     Creates a configuration dictionary for an EMR step that copies files between S3 and HDFS using s3-dist-cp.
 
@@ -403,16 +403,26 @@ def s3_cp(step_name, src, dest, action_on_failure="TERMINATE_CLUSTER"):
         src (str): The source path (S3 or HDFS) to copy files from.
         dest (str): The destination path (S3 or HDFS) to copy files to.
         action_on_failure (str, optional): Action to take if the step fails. Defaults to "TERMINATE_CLUSTER".
+        extra_args (iterable of str, optional): Additional arguments for s3-dist-cp. Hadoop generic options
+            starting with "-D" are placed before "--src=..." (as required by ToolRunner/GenericOptionsParser);
+            all other arguments are placed after "--dest=...".
 
     Returns:
         dict: A dictionary representing the EMR step configuration for s3-dist-cp.
     """
+    generic_opts = []
+    tool_opts = []
+    for arg in extra_args or ():
+        if arg.startswith("-D"):
+            generic_opts.append(arg)
+        else:
+            tool_opts.append(arg)
     return {
         "Name": step_name,
         "ActionOnFailure": action_on_failure,
         "HadoopJarStep": {
             "Jar": "/usr/share/aws/emr/s3-dist-cp/lib/s3-dist-cp.jar",
-            "Args": [f"--src={src}", f"--dest={dest}"],
+            "Args": [*generic_opts, f"--src={src}", f"--dest={dest}", *tool_opts],
         },
     }
 
