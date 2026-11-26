@@ -26,8 +26,15 @@ DAG_ID = "Full_index_to_solr"
 
 
 def get_spark_steps(
-    solr_collection_name, include_sampling, include_jack_knife, include_clustering, include_outlier, num_partitions
+    solr_collection_name,
+    include_sampling,
+    include_jack_knife,
+    include_clustering,
+    include_outlier,
+    num_partitions,
+    s3_dist_cp_reduces=ala_config.S3_DIST_CP_REDUCES,
 ):
+    copy_args = [f"-Dmapreduce.job.reduces={s3_dist_cp_reduces}"] if s3_dist_cp_reduces > 0 else None
 
     return [
         emr_python_step(
@@ -40,16 +47,17 @@ def get_spark_steps(
         ),
         s3_cp(
             "c. Copy Sampling and IndexRecord from S3",
-            f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets",
-            "hdfs:///pipelines-all-datasets",
+            f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-all-datasets/",
+            "hdfs:///pipelines-all-datasets/",
+            extra_args=copy_args,
         ),
         step_bash_cmd("d. Sampling pipeline", " la-pipelines sample all --cluster"),
         step_bash_cmd("e. JackKnife pipeline", " la-pipelines jackknife all --cluster"),
         step_bash_cmd("f. Clustering", " la-pipelines clustering all --cluster"),
         s3_cp(
             "g. Copy Outlier from S3",
-            f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-outlier",
-            "hdfs:///pipelines-outlier",
+            f"s3://{ala_config.S3_BUCKET_AVRO}/pipelines-outlier/",
+            "hdfs:///pipelines-outlier/",
             action_on_failure="CONTINUE",
         ),
         s3_cp(
@@ -123,6 +131,8 @@ with DAG(
         "includeOutlier": "true",
         "skipImageSync": "false",
         "time_range": (None, None),
+        "scalable_cluster": ala_config.EMR_SCALING_CONFIG["enabled"],
+        "s3_dist_cp_reduces": ala_config.S3_DIST_CP_REDUCES,
     },
 ) as dag:
 
@@ -320,6 +330,11 @@ with DAG(
             if not solr_collection_name:
                 raise ValueError("SOLR collection name missing from XCom")
 
+            conf = kwargs["dag_run"].conf or {}
+            params = kwargs.get("params") or {}
+            raw_reduces = conf.get("s3_dist_cp_reduces", params.get("s3_dist_cp_reduces", ala_config.S3_DIST_CP_REDUCES))
+            s3_dist_cp_reduces = int(raw_reduces) if raw_reduces not in (None, "") else 0
+
             spark_steps.extend(
                 get_spark_steps(
                     solr_collection_name=solr_collection_name,
@@ -328,6 +343,7 @@ with DAG(
                     include_clustering=include_clustering,
                     include_outlier=include_outlier,
                     num_partitions=num_partitions,
+                    s3_dist_cp_reduces=s3_dist_cp_reduces,
                 )
             )
             return spark_steps

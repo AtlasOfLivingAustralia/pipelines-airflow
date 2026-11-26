@@ -14,6 +14,7 @@ from airflow.operators.empty import EmptyOperator
 from airflow.providers.slack.notifications.slack import send_slack_notification
 from airflow.providers.slack.operators.slack import SlackAPIPostOperator
 from ala import ala_config
+from ala.ala_config import strtobool
 from ala import jwt_auth
 from collections import OrderedDict
 
@@ -22,11 +23,6 @@ log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
 
 ALLOWED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"}
-
-
-def strtobool(val: str) -> bool:
-    """Lightweight, non-deprecated alternative to distutils.util.strtobool."""
-    return str(val).strip().lower() in {"y", "yes", "t", "true", "on", "1"}
 
 
 def http_request_with_retry(
@@ -394,7 +390,7 @@ def get_recent_images_drs(start_date: str, end_date: str = None):
     return {d: c for d, c in drs.items() if d != "no_dataresource"}
 
 
-def s3_cp(step_name, src, dest, action_on_failure="TERMINATE_CLUSTER"):
+def s3_cp(step_name, src, dest, action_on_failure="TERMINATE_CLUSTER", extra_args=None):
     """
     Creates a configuration dictionary for an EMR step that copies files between S3 and HDFS using s3-dist-cp.
 
@@ -403,16 +399,26 @@ def s3_cp(step_name, src, dest, action_on_failure="TERMINATE_CLUSTER"):
         src (str): The source path (S3 or HDFS) to copy files from.
         dest (str): The destination path (S3 or HDFS) to copy files to.
         action_on_failure (str, optional): Action to take if the step fails. Defaults to "TERMINATE_CLUSTER".
+        extra_args (iterable of str, optional): Additional arguments for s3-dist-cp. Hadoop generic options
+            starting with "-D" are placed before "--src=..." (as required by ToolRunner/GenericOptionsParser);
+            all other arguments are placed after "--dest=...".
 
     Returns:
         dict: A dictionary representing the EMR step configuration for s3-dist-cp.
     """
+    generic_opts = []
+    tool_opts = []
+    for arg in extra_args or ():
+        if arg.startswith("-D"):
+            generic_opts.append(arg)
+        else:
+            tool_opts.append(arg)
     return {
         "Name": step_name,
         "ActionOnFailure": action_on_failure,
         "HadoopJarStep": {
             "Jar": "/usr/share/aws/emr/s3-dist-cp/lib/s3-dist-cp.jar",
-            "Args": [f"--src={src}", f"--dest={dest}"],
+            "Args": [*generic_opts, f"--src={src}", f"--dest={dest}", *tool_opts],
         },
     }
 

@@ -16,6 +16,18 @@ class ClusterType(Enum):
     PIPELINES_LARGE = "Pipelines cluster"
 
 
+def is_scalable_cluster_enabled(
+    scalable: bool = False,
+    dag_run_conf: dict | None = None,
+    params: dict | None = None,
+) -> bool:
+    """Resolve scalable EMR mode: dag_run_conf -> params -> scalable kwarg."""
+    for source in (dag_run_conf, params):
+        if source and source.get("scalable_cluster") is not None:
+            return ala_helper.strtobool(source["scalable_cluster"])
+    return bool(scalable)
+
+
 def run_large_emr(
     dag,
     spark_steps,
@@ -23,6 +35,7 @@ def run_large_emr(
     ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB,
     cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT,
     dataset_ids='ALL',
+    scalable: bool = False,
 ):
     """
     Creates and manages an AWS EMR cluster workflow within an Airflow DAG.
@@ -38,10 +51,10 @@ def run_large_emr(
         bootstrap_script (str): The path or URI to the bootstrap script to initialize the cluster.
         ebs_size_in_gb (int, optional): The size of the EBS volume in GB for each instance. Defaults to ala_config.EC2_LARGE_EBS_SIZE_IN_GB.
         cluster_size (int, optional): The number of EC2 instances in the cluster. Defaults to ala_config.EC2_LARGE_INSTANCE_COUNT.
+        scalable (bool, optional): Explicit per-DAG override for scalable EMR cluster mode. Defaults to False.
     Returns:
         None: The function defines task dependencies within the DAG but does not return a value.
     """
-
     cluster_creator = PythonOperator(
         task_id="create_emr_cluster",
         python_callable=setup_cluster,
@@ -51,6 +64,7 @@ def run_large_emr(
             "inst_type": "None",
             "cluster_type": ClusterType.PIPELINES_LARGE,
             "bootstrap_script": bootstrap_script,
+            "scalable": scalable,
         },
         provide_context=True,
     )
@@ -92,7 +106,11 @@ def obj_as_dict(obj):
         __add_to_dict__ list
 
     """
-    return {attr: getattr(obj, attr) for attr in getattr(obj, "__add_to_dict__", [])}
+    result = {attr: getattr(obj, attr) for attr in getattr(obj, "__add_to_dict__", [])}
+    managed_scaling_policy = getattr(obj, "managed_scaling_policy", None)
+    if managed_scaling_policy:
+        result["ManagedScalingPolicy"] = managed_scaling_policy
+    return result
 
 
 def sanitize_tag(input_string):
@@ -205,6 +223,7 @@ class EMRConfig:
         init=False,
     )
     Steps: list = field(default_factory=lambda: [], init=False)
+    managed_scaling_policy: dict | None = field(default=None, kw_only=True)
 
     @property
     def Name(self) -> str:
@@ -344,6 +363,31 @@ class PipelinesSingleEMRConfig(PipelinesEMRConfig):
         self.Tags += [{"Key": "emrcluster", "Value": "single node"}]
 
 
+def _instance_group(
+    name: str,
+    market: str,
+    role: str,
+    instance_type: str,
+    count: int,
+    ebs_size_in_gb: int,
+    ebs_volume_type: str,
+) -> dict:
+    group = {
+        "Name": name,
+        "Market": market,
+        "InstanceRole": role,
+        "InstanceType": instance_type,
+        "InstanceCount": count,
+    }
+    if ebs_size_in_gb > 0:
+        group["EbsConfiguration"] = {
+            "EbsBlockDeviceConfigs": [
+                {"VolumeSpecification": {"SizeInGB": ebs_size_in_gb, "VolumeType": ebs_volume_type}}
+            ]
+        }
+    return group
+
+
 @dataclass
 class PipelinesMultiEMRConfig(PipelinesEMRConfig):
     """Configuration for EMR cluster for pipelines with multiple nodes."""
@@ -351,39 +395,60 @@ class PipelinesMultiEMRConfig(PipelinesEMRConfig):
     slave_instance_count: int
     instance_type: str
     ebs_size_in_gb: int
+    master_instance_type: str | None = None
+    ebs_volume_type: str = "standard"
+    task_instance_type: str = ""
+    task_instance_count: int = 0
+    task_market: str = "SPOT"
+    task_ebs_size_in_gb: int = 0
+    task_ebs_volume_type: str = "gp3"
 
     @property
     def instance_groups(self):
-        return [
-            {
-                "Name": "Master nodes",
-                "Market": ala_config.MASTER_MARKET,
-                "InstanceRole": "MASTER",
-                "InstanceType": ala_config.EC2_LARGE_INSTANCE_TYPE,
-                "InstanceCount": 1,
-                "EbsConfiguration": {
-                    "EbsBlockDeviceConfigs": [
-                        {"VolumeSpecification": {"SizeInGB": self.ebs_size_in_gb, "VolumeType": "standard"}}
-                    ]
-                },
-            },
-            {
-                "Name": "Slave nodes",
-                "Market": ala_config.SLAVE_MARKET,
-                "InstanceRole": "CORE",
-                "InstanceType": ala_config.EC2_LARGE_INSTANCE_TYPE,
-                "InstanceCount": self.slave_instance_count,
-                "EbsConfiguration": {
-                    "EbsBlockDeviceConfigs": [
-                        {"VolumeSpecification": {"SizeInGB": self.ebs_size_in_gb, "VolumeType": "standard"}}
-                    ]
-                },
-            },
+        groups = [
+            _instance_group(
+                "Master nodes",
+                ala_config.MASTER_MARKET,
+                "MASTER",
+                self.master_instance_type or self.instance_type,
+                1,
+                self.ebs_size_in_gb,
+                self.ebs_volume_type,
+            ),
+            _instance_group(
+                "Slave nodes",
+                ala_config.SLAVE_MARKET,
+                "CORE",
+                self.instance_type,
+                self.slave_instance_count,
+                self.ebs_size_in_gb,
+                self.ebs_volume_type,
+            ),
         ]
+        if self.task_instance_type and (self.task_instance_count > 0 or self.managed_scaling_policy):
+            groups.append(
+                _instance_group(
+                    "Task nodes",
+                    self.task_market,
+                    "TASK",
+                    self.task_instance_type,
+                    max(1, self.task_instance_count),
+                    self.task_ebs_size_in_gb,
+                    self.task_ebs_volume_type,
+                )
+            )
+        return groups
 
     def __post_init__(self):
         super().__post_init__()
         self.Tags += [{"Key": "emrcluster", "Value": f"{1+self.slave_instance_count} node"}]
+        if self.managed_scaling_policy:
+            self.Configurations = [
+                {**entry, "Properties": {**entry["Properties"], "maximizeResourceAllocation": "false"}}
+                if entry["Classification"] == "spark"
+                else entry
+                for entry in self.Configurations
+            ]
 
 
 def get_pre_ingestion_cluster(dag_id, instance_type, name, drs=""):
@@ -474,9 +539,12 @@ def get_medium_cluster(
 def get_large_cluster(
     dag_id,
     bootstrap_actions_script,
-    ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB,
-    cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT,
+    ebs_size_in_gb: int | None = None,
+    cluster_size: int | None = None,
     drs="",
+    scalable: bool = False,
+    dag_run_conf: dict | None = None,
+    params: dict | None = None,
 ):
     """
     Creates and returns a dictionary representation of a large EMR cluster configuration.
@@ -484,21 +552,62 @@ def get_large_cluster(
     Args:
         dag_id (str): The DAG identifier for the cluster.
         bootstrap_actions_script (str): Path or identifier for the bootstrap actions script.
-        ebs_size_in_gb (int, optional): Size of the EBS volume in GB for each instance. Defaults to ala_config.EC2_LARGE_EBS_SIZE_IN_GB.
-        cluster_size (int, optional): Number of slave instances in the cluster. Defaults to ala_config.EC2_LARGE_INSTANCE_COUNT.
+        ebs_size_in_gb (int, optional): Size of the EBS volume in GB for each instance.
+        cluster_size (int, optional): Number of core instances in the cluster.
         drs (str, optional): Data resources string or configuration. Defaults to an empty string.
+        scalable (bool, optional): Explicit per-DAG override for scalable cluster mode. Defaults to False.
+        dag_run_conf (dict, optional): Runtime `dag_run.conf` dictionary for per-run overrides.
+        params (dict, optional): DAG `params` dictionary for per-run overrides.
 
     Returns:
         dict: Dictionary representation of the PipelinesMultiEMRConfig for the large cluster.
     """
     bootstrap_actions = ala_config.get_bootstrap_actions(bootstrap_actions_script)
+    use_scalable = is_scalable_cluster_enabled(
+        scalable=scalable,
+        dag_run_conf=dag_run_conf,
+        params=params,
+    )
+
+    if not use_scalable:
+        return obj_as_dict(
+            PipelinesMultiEMRConfig(
+                dag_id=dag_id,
+                instance_type=ala_config.EC2_LARGE_INSTANCE_TYPE,
+                name=f"{dag_id} {drs}",
+                ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB if ebs_size_in_gb is None else ebs_size_in_gb,
+                ebs_volume_type=ala_config.EC2_LARGE_EBS_VOLUME_TYPE,
+                slave_instance_count=ala_config.EC2_LARGE_INSTANCE_COUNT if cluster_size is None else cluster_size,
+                BootstrapActions=bootstrap_actions,
+                data_resources=drs,
+            )
+        )
+
+    scaling = ala_config.EMR_SCALING_CONFIG
+    managed_scaling_policy = {
+        "ComputeLimits": {
+            "UnitType": "Instances",
+            "MinimumCapacityUnits": scaling["min_capacity_units"],
+            "MaximumCapacityUnits": scaling["max_capacity_units"],
+            "MaximumOnDemandCapacityUnits": scaling["max_ondemand_units"],
+            "MaximumCoreCapacityUnits": scaling["max_core_units"],
+        }
+    }
     return obj_as_dict(
         PipelinesMultiEMRConfig(
             dag_id=dag_id,
-            instance_type=ala_config.EC2_LARGE_INSTANCE_TYPE,
+            master_instance_type=scaling["master_instance_type"],
+            instance_type=scaling["core_instance_type"],
             name=f"{dag_id} {drs}",
-            ebs_size_in_gb=ebs_size_in_gb,
-            slave_instance_count=cluster_size,
+            ebs_size_in_gb=scaling["ebs_size_in_gb"] if ebs_size_in_gb is None else ebs_size_in_gb,
+            ebs_volume_type=ala_config.EC2_LARGE_EBS_VOLUME_TYPE,
+            slave_instance_count=scaling["core_instance_count"] if cluster_size is None else cluster_size,
+            task_instance_type=scaling["task_instance_type"],
+            task_instance_count=scaling["task_instance_count"],
+            task_market=scaling["task_market"],
+            task_ebs_size_in_gb=scaling["task_ebs_size_in_gb"],
+            task_ebs_volume_type=scaling["task_ebs_volume_type"],
+            managed_scaling_policy=managed_scaling_policy,
             BootstrapActions=bootstrap_actions,
             data_resources=drs,
         )
@@ -547,7 +656,15 @@ def setup_cluster(dag_id, dataset_ids, cluster_type: ClusterType, inst_type, **k
     elif cluster_type == ClusterType.PIPELINES_SMALL:
         emr_config = get_small_cluster(dag_id, bootstrap_actions_script=kwargs.get("bootstrap_script"), drs=dataset_ids)
     else:
-        emr_config = get_large_cluster(dag_id, bootstrap_actions_script=kwargs.get("bootstrap_script"), drs=dataset_ids)
+        dag_run = kwargs.get("dag_run")
+        emr_config = get_large_cluster(
+            dag_id,
+            bootstrap_actions_script=kwargs.get("bootstrap_script"),
+            drs=dataset_ids,
+            scalable=bool(kwargs.get("scalable", False)),
+            dag_run_conf=dag_run.conf if dag_run else None,
+            params=kwargs.get("params"),
+        )
 
     log.info("emr_config is configured as %s", emr_config)
 
