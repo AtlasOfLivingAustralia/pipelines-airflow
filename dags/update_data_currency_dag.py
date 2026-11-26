@@ -40,6 +40,7 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
     s3_bucket = ala_config.S3_BUCKET_DWCA
     s3_folder = "dwca-imports/"
     collectory_value = "dataCurrency"
+    timezone = "Australia/Sydney"
 
     # Request properties
     base_url = ala_config.SOLR_URL
@@ -107,7 +108,9 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
             return filter_list
 
         filter_uid_list = sanitise_input()
-        reference_timestamp = datetime.fromisoformat(solr_reference_date) if solr_reference_date else None 
+        reference_timestamp = None
+        if solr_reference_date:
+            reference_timestamp = datetime.fromisoformat(solr_reference_date).replace(tzinfo=ZoneInfo(timezone))
 
         log.info(f"Getting all dwca-import files from s3://{s3_bucket}/{s3_folder}")
         s3 = boto3.client("s3")
@@ -129,7 +132,7 @@ def update_data_currency_values(datasetIDs: str = "", force_update: bool = False
                     continue
 
                 timestamp: datetime = object["LastModified"]
-                local_timestamp = timestamp.astimezone(ZoneInfo("Australia/Sydney"))
+                local_timestamp = timestamp.astimezone(ZoneInfo(timezone))
 
                 if reference_timestamp is None or local_timestamp >= reference_timestamp:
                     updates[dr_uid] = local_timestamp.isoformat()
