@@ -3,10 +3,6 @@ import json
 from airflow.models import Variable
 
 
-def _int_var(name: str, default: int) -> int:
-    val = Variable.get(name, default_var="").strip()
-    return int(val) if val else default
-
 ALA_API_KEY = Variable.get("ala_api_key")
 DOI_API_KEY = Variable.get("doi_api_key")
 # ALA_API_URL = Variable.get("ala_api_url")
@@ -31,23 +27,32 @@ EC2_LARGE_EBS_VOLUME_TYPE = Variable.get("ec2_large_ebs_volume_type", default_va
 EC2_LARGE_INSTANCE_COUNT = int(Variable.get("ec2_large_instance_count"))
 EC2_LARGE_INSTANCE_TYPE = Variable.get("ec2_large_instance_type")
 EC2_XLARGE_INSTANCE_TYPE = Variable.get("ec2_large_instance_type")
-EMR_MANAGED_SCALING_ENABLED = Variable.get("emr_managed_scaling_enabled", default_var="false").lower() in ("true", "1", "t")
-EMR_SCALABLE_DAGS = frozenset(
-    d.strip() for d in Variable.get("emr_scalable_dags", default_var="Full_index_to_solr").split(",") if d.strip()
-)
-EC2_SCALABLE_MASTER_INSTANCE_TYPE = Variable.get("ec2_scalable_master_instance_type", default_var="").strip() or EC2_LARGE_INSTANCE_TYPE
-EC2_SCALABLE_CORE_INSTANCE_TYPE = Variable.get("ec2_scalable_core_instance_type", default_var="").strip() or EC2_LARGE_INSTANCE_TYPE
-EC2_SCALABLE_CORE_INSTANCE_COUNT = _int_var("ec2_scalable_core_instance_count", EC2_LARGE_INSTANCE_COUNT)
-EC2_SCALABLE_EBS_SIZE_IN_GB = _int_var("ec2_scalable_ebs_size_in_gb", EC2_LARGE_EBS_SIZE_IN_GB)
-EMR_MIN_CAPACITY_UNITS = _int_var("emr_min_capacity_units", EC2_LARGE_INSTANCE_COUNT)
-EMR_MAX_CAPACITY_UNITS = _int_var("emr_max_capacity_units", EC2_LARGE_INSTANCE_COUNT)
-EMR_MAX_ONDEMAND_UNITS = _int_var("emr_max_ondemand_units", EC2_LARGE_INSTANCE_COUNT)
-EMR_MAX_CORE_UNITS = _int_var("emr_max_core_units", EC2_LARGE_INSTANCE_COUNT)
-EC2_TASK_INSTANCE_TYPE = Variable.get("ec2_task_instance_type", default_var="")
-EC2_TASK_INSTANCE_COUNT = _int_var("ec2_task_instance_count", 0)
-TASK_MARKET = Variable.get("task_market", default_var="SPOT")
-EC2_TASK_EBS_SIZE_IN_GB = _int_var("ec2_task_ebs_size_in_gb", 0)
-EC2_TASK_EBS_VOLUME_TYPE = Variable.get("ec2_task_ebs_volume_type", default_var="gp3")
+_raw_scaling = Variable.get("emr_scaling_config", default_var={}, deserialize_json=True)
+_raw_dags = _raw_scaling.get("scalable_dags")
+if _raw_dags is None:
+    _scalable_dags = frozenset(["Full_index_to_solr"])
+elif isinstance(_raw_dags, str):
+    _scalable_dags = frozenset(d.strip() for d in _raw_dags.split(",") if d.strip())
+else:
+    _scalable_dags = frozenset(str(d).strip() for d in _raw_dags if str(d).strip())
+
+EMR_SCALING_CONFIG = {
+    "enabled": str(_raw_scaling.get("enabled", False)).strip().lower() in ("true", "1", "t"),
+    "scalable_dags": _scalable_dags,
+    "master_instance_type": (_raw_scaling.get("master_instance_type") or "").strip() or EC2_LARGE_INSTANCE_TYPE,
+    "core_instance_type": (_raw_scaling.get("core_instance_type") or "").strip() or EC2_LARGE_INSTANCE_TYPE,
+    "core_instance_count": int(_raw_scaling.get("core_instance_count", EC2_LARGE_INSTANCE_COUNT)),
+    "ebs_size_in_gb": int(_raw_scaling.get("ebs_size_in_gb", EC2_LARGE_EBS_SIZE_IN_GB)),
+    "min_capacity_units": int(_raw_scaling.get("min_capacity_units", EC2_LARGE_INSTANCE_COUNT)),
+    "max_capacity_units": int(_raw_scaling.get("max_capacity_units", EC2_LARGE_INSTANCE_COUNT)),
+    "max_ondemand_units": int(_raw_scaling.get("max_ondemand_units", EC2_LARGE_INSTANCE_COUNT)),
+    "max_core_units": int(_raw_scaling.get("max_core_units", EC2_LARGE_INSTANCE_COUNT)),
+    "task_instance_type": (_raw_scaling.get("task_instance_type") or "").strip(),
+    "task_instance_count": int(_raw_scaling.get("task_instance_count", 0)),
+    "task_market": (_raw_scaling.get("task_market") or "SPOT").strip(),
+    "task_ebs_size_in_gb": int(_raw_scaling.get("task_ebs_size_in_gb", 0)),
+    "task_ebs_volume_type": (_raw_scaling.get("task_ebs_volume_type") or "gp3").strip(),
+}
 PREINGESTION_EBS_SIZE_IN_GB = int(Variable.get("preingestion_ebs_size_in_gb"))
 EC2_SUBNET_ID = Variable.get("ec2_subnet_id")
 EC2_SMALL_EBS_SIZE_IN_GB = int(Variable.get("ec2_small_ebs_size_in_gb"))
@@ -86,6 +91,7 @@ S3_BUCKET = Variable.get("s3_bucket")
 S3_BUCKET_DWCA = Variable.get("s3_bucket_dwca")
 S3_BUCKET_AVRO = Variable.get("s3_bucket_avro")  # renamed from s3_bucket_databox
 S3_BUCKET_DWCA_EXPORTS = Variable.get("s3_bucket_dwca_exports")
+S3_DIST_CP_REDUCES = int(Variable.get("s3_dist_cp_reduces", default_var="64") or 0)
 SAMPLING_URL = Variable.get("sampling_url")
 SDS_URL = Variable.get("sds_url")
 SDS_ARTIFACT_URL = Variable.get("sds_artifact_url")

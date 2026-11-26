@@ -37,7 +37,7 @@ def is_scalable_cluster_enabled(
     params: dict | None = None,
 ) -> bool:
     """Resolve scalable EMR mode: master switch -> dag_run_conf -> params -> scalable kwarg -> allowlist."""
-    if not ala_config.EMR_MANAGED_SCALING_ENABLED:
+    if not ala_config.EMR_SCALING_CONFIG["enabled"]:
         return False
 
     for source in (dag_run_conf, params):
@@ -49,7 +49,7 @@ def is_scalable_cluster_enabled(
     if scalable is not None:
         return scalable
 
-    return dag_id in ala_config.EMR_SCALABLE_DAGS
+    return dag_id in ala_config.EMR_SCALING_CONFIG["scalable_dags"]
 
 
 def run_large_emr(
@@ -608,29 +608,30 @@ def get_large_cluster(
             )
         )
 
+    scaling = ala_config.EMR_SCALING_CONFIG
     managed_scaling_policy = {
         "ComputeLimits": {
             "UnitType": "Instances",
-            "MinimumCapacityUnits": ala_config.EMR_MIN_CAPACITY_UNITS,
-            "MaximumCapacityUnits": ala_config.EMR_MAX_CAPACITY_UNITS,
-            "MaximumOnDemandCapacityUnits": ala_config.EMR_MAX_ONDEMAND_UNITS,
-            "MaximumCoreCapacityUnits": ala_config.EMR_MAX_CORE_UNITS,
+            "MinimumCapacityUnits": scaling["min_capacity_units"],
+            "MaximumCapacityUnits": scaling["max_capacity_units"],
+            "MaximumOnDemandCapacityUnits": scaling["max_ondemand_units"],
+            "MaximumCoreCapacityUnits": scaling["max_core_units"],
         }
     }
     return obj_as_dict(
         PipelinesMultiEMRConfig(
             dag_id=dag_id,
-            master_instance_type=ala_config.EC2_SCALABLE_MASTER_INSTANCE_TYPE,
-            instance_type=ala_config.EC2_SCALABLE_CORE_INSTANCE_TYPE,
+            master_instance_type=scaling["master_instance_type"],
+            instance_type=scaling["core_instance_type"],
             name=f"{dag_id} {drs}",
-            ebs_size_in_gb=ala_config.EC2_SCALABLE_EBS_SIZE_IN_GB if ebs_size_in_gb is None else ebs_size_in_gb,
+            ebs_size_in_gb=scaling["ebs_size_in_gb"] if ebs_size_in_gb is None else ebs_size_in_gb,
             ebs_volume_type=ala_config.EC2_LARGE_EBS_VOLUME_TYPE,
-            slave_instance_count=ala_config.EC2_SCALABLE_CORE_INSTANCE_COUNT if cluster_size is None else cluster_size,
-            task_instance_type=ala_config.EC2_TASK_INSTANCE_TYPE,
-            task_instance_count=ala_config.EC2_TASK_INSTANCE_COUNT,
-            task_market=ala_config.TASK_MARKET,
-            task_ebs_size_in_gb=ala_config.EC2_TASK_EBS_SIZE_IN_GB,
-            task_ebs_volume_type=ala_config.EC2_TASK_EBS_VOLUME_TYPE,
+            slave_instance_count=scaling["core_instance_count"] if cluster_size is None else cluster_size,
+            task_instance_type=scaling["task_instance_type"],
+            task_instance_count=scaling["task_instance_count"],
+            task_market=scaling["task_market"],
+            task_ebs_size_in_gb=scaling["task_ebs_size_in_gb"],
+            task_ebs_volume_type=scaling["task_ebs_volume_type"],
             managed_scaling_policy=managed_scaling_policy,
             BootstrapActions=bootstrap_actions,
             data_resources=drs,
