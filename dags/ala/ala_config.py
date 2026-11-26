@@ -3,6 +3,11 @@ import json
 from airflow.models import Variable
 
 
+def strtobool(val: object) -> bool:
+    """Lightweight, non-deprecated alternative to distutils.util.strtobool."""
+    return str(val).strip().lower() in {"y", "yes", "t", "true", "on", "1"}
+
+
 ALA_API_KEY = Variable.get("ala_api_key")
 DOI_API_KEY = Variable.get("doi_api_key")
 # ALA_API_URL = Variable.get("ala_api_url")
@@ -28,17 +33,8 @@ EC2_LARGE_INSTANCE_COUNT = int(Variable.get("ec2_large_instance_count"))
 EC2_LARGE_INSTANCE_TYPE = Variable.get("ec2_large_instance_type")
 EC2_XLARGE_INSTANCE_TYPE = Variable.get("ec2_large_instance_type")
 _raw_scaling = Variable.get("emr_scaling_config", default_var={}, deserialize_json=True)
-_raw_dags = _raw_scaling.get("scalable_dags")
-if _raw_dags is None:
-    _scalable_dags = frozenset(["Full_index_to_solr"])
-elif isinstance(_raw_dags, str):
-    _scalable_dags = frozenset(d.strip() for d in _raw_dags.split(",") if d.strip())
-else:
-    _scalable_dags = frozenset(str(d).strip() for d in _raw_dags if str(d).strip())
-
 EMR_SCALING_CONFIG = {
-    "enabled": str(_raw_scaling.get("enabled", False)).strip().lower() in ("true", "1", "t"),
-    "scalable_dags": _scalable_dags,
+    "enabled": strtobool(_raw_scaling.get("enabled", False)),
     "master_instance_type": (_raw_scaling.get("master_instance_type") or "").strip() or EC2_LARGE_INSTANCE_TYPE,
     "core_instance_type": (_raw_scaling.get("core_instance_type") or "").strip() or EC2_LARGE_INSTANCE_TYPE,
     "core_instance_count": int(_raw_scaling.get("core_instance_count", EC2_LARGE_INSTANCE_COUNT)),

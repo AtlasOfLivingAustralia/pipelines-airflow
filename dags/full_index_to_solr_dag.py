@@ -131,7 +131,7 @@ with DAG(
         "includeOutlier": "true",
         "skipImageSync": "false",
         "time_range": (None, None),
-        "scalable_cluster": "default",
+        "scalable_cluster": ala_config.EMR_SCALING_CONFIG["enabled"],
         "s3_dist_cp_reduces": ala_config.S3_DIST_CP_REDUCES,
     },
 ) as dag:

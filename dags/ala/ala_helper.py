@@ -14,6 +14,7 @@ from airflow.operators.empty import EmptyOperator
 from airflow.providers.slack.notifications.slack import send_slack_notification
 from airflow.providers.slack.operators.slack import SlackAPIPostOperator
 from ala import ala_config
+from ala.ala_config import strtobool
 from ala import jwt_auth
 from collections import OrderedDict
 
@@ -22,11 +23,6 @@ log: logging.log = logging.getLogger("airflow")
 log.setLevel(logging.INFO)
 
 ALLOWED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"}
-
-
-def strtobool(val: str) -> bool:
-    """Lightweight, non-deprecated alternative to distutils.util.strtobool."""
-    return str(val).strip().lower() in {"y", "yes", "t", "true", "on", "1"}
 
 
 def http_request_with_retry(

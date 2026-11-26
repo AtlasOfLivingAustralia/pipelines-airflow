@@ -16,40 +16,16 @@ class ClusterType(Enum):
     PIPELINES_LARGE = "Pipelines cluster"
 
 
-_SCALABLE_OVERRIDES = {
-    "true": True, "1": True, "yes": True,
-    "false": False, "0": False, "no": False,
-}
-
-
-def _parse_scalable_override(value: object) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    return _SCALABLE_OVERRIDES.get(str(value).strip().lower())
-
-
 def is_scalable_cluster_enabled(
-    dag_id: str,
-    scalable: bool | None = None,
+    scalable: bool = False,
     dag_run_conf: dict | None = None,
     params: dict | None = None,
 ) -> bool:
-    """Resolve scalable EMR mode: master switch -> dag_run_conf -> params -> scalable kwarg -> allowlist."""
-    if not ala_config.EMR_SCALING_CONFIG["enabled"]:
-        return False
-
+    """Resolve scalable EMR mode: dag_run_conf -> params -> scalable kwarg."""
     for source in (dag_run_conf, params):
-        if source:
-            parsed = _parse_scalable_override(source.get("scalable_cluster"))
-            if parsed is not None:
-                return parsed
-
-    if scalable is not None:
-        return scalable
-
-    return dag_id in ala_config.EMR_SCALING_CONFIG["scalable_dags"]
+        if source and source.get("scalable_cluster") is not None:
+            return ala_helper.strtobool(source["scalable_cluster"])
+    return bool(scalable)
 
 
 def run_large_emr(
@@ -59,7 +35,7 @@ def run_large_emr(
     ebs_size_in_gb=ala_config.EC2_LARGE_EBS_SIZE_IN_GB,
     cluster_size=ala_config.EC2_LARGE_INSTANCE_COUNT,
     dataset_ids='ALL',
-    scalable: bool | None = None,
+    scalable: bool = False,
 ):
     """
     Creates and manages an AWS EMR cluster workflow within an Airflow DAG.
@@ -75,7 +51,7 @@ def run_large_emr(
         bootstrap_script (str): The path or URI to the bootstrap script to initialize the cluster.
         ebs_size_in_gb (int, optional): The size of the EBS volume in GB for each instance. Defaults to ala_config.EC2_LARGE_EBS_SIZE_IN_GB.
         cluster_size (int, optional): The number of EC2 instances in the cluster. Defaults to ala_config.EC2_LARGE_INSTANCE_COUNT.
-        scalable (bool, optional): Explicit per-DAG override for scalable EMR cluster mode. Defaults to None.
+        scalable (bool, optional): Explicit per-DAG override for scalable EMR cluster mode. Defaults to False.
     Returns:
         None: The function defines task dependencies within the DAG but does not return a value.
     """
@@ -566,7 +542,7 @@ def get_large_cluster(
     ebs_size_in_gb: int | None = None,
     cluster_size: int | None = None,
     drs="",
-    scalable: bool | None = None,
+    scalable: bool = False,
     dag_run_conf: dict | None = None,
     params: dict | None = None,
 ):
@@ -579,7 +555,7 @@ def get_large_cluster(
         ebs_size_in_gb (int, optional): Size of the EBS volume in GB for each instance.
         cluster_size (int, optional): Number of core instances in the cluster.
         drs (str, optional): Data resources string or configuration. Defaults to an empty string.
-        scalable (bool, optional): Explicit per-DAG override for scalable cluster mode.
+        scalable (bool, optional): Explicit per-DAG override for scalable cluster mode. Defaults to False.
         dag_run_conf (dict, optional): Runtime `dag_run.conf` dictionary for per-run overrides.
         params (dict, optional): DAG `params` dictionary for per-run overrides.
 
@@ -588,7 +564,6 @@ def get_large_cluster(
     """
     bootstrap_actions = ala_config.get_bootstrap_actions(bootstrap_actions_script)
     use_scalable = is_scalable_cluster_enabled(
-        dag_id,
         scalable=scalable,
         dag_run_conf=dag_run_conf,
         params=params,
@@ -686,7 +661,7 @@ def setup_cluster(dag_id, dataset_ids, cluster_type: ClusterType, inst_type, **k
             dag_id,
             bootstrap_actions_script=kwargs.get("bootstrap_script"),
             drs=dataset_ids,
-            scalable=kwargs.get("scalable"),
+            scalable=bool(kwargs.get("scalable", False)),
             dag_run_conf=dag_run.conf if dag_run else None,
             params=kwargs.get("params"),
         )
