@@ -22,6 +22,8 @@ import argparse
 import subprocess
 import shutil
 import os
+import re
+from pathlib import Path
 from pyspark.sql.types import StructType, MapType, ArrayType
 
 
@@ -144,7 +146,8 @@ def read_avro(spark: SparkSession, path: str):
 # Schema comparison
 # ---------------------------------------------------------------------------
 
-def compare_schemas(df_source, df_target) -> bool:
+def compare_schemas(df_source, df_target) -> list[str]:
+    """Log detailed schema differences and return concise notes for the report."""
     src_fields = {f.name: str(f.dataType) for f in df_source.schema.fields}
     tgt_fields = {f.name: str(f.dataType) for f in df_target.schema.fields}
 
@@ -156,17 +159,22 @@ def compare_schemas(df_source, df_target) -> bool:
     }
 
     print("\n=== Schema Comparison ===")
-    if not (only_in_source or only_in_target or type_mismatches):
-        print("  Schemas are identical.")
-        return True
-
+    differences = []
     if only_in_source:
-        print(f"  Columns only in SOURCE : {sorted(only_in_source)}")
+        note = f"Columns only in test: {', '.join(sorted(only_in_source))}"
+        differences.append(note)
+        print(f"  {note}")
     if only_in_target:
-        print(f"  Columns only in TARGET : {sorted(only_in_target)}")
+        note = f"Columns only in dev: {', '.join(sorted(only_in_target))}"
+        differences.append(note)
+        print(f"  {note}")
     for col in sorted(type_mismatches):
-        print(f"  Type mismatch [{col}]: source={src_fields[col]}  target={tgt_fields[col]} \n")
-    return False
+        note = f"Type mismatch [{col}]"
+        differences.append(note)
+        print(f"  {note}: test={src_fields[col]}, dev={tgt_fields[col]}")
+    if not differences:
+        print("  Schemas are identical.")
+    return differences
 
 
 # ---------------------------------------------------------------------------
@@ -201,8 +209,7 @@ def normalize_column(col_ref, data_type):
         value_type = data_type.valueType
 
         # 1. Filter out ignored keys from the map
-        all_keys = F.map_keys(col_ref)
-        filtered_keys = F.array_remove(all_keys, None)
+        filtered_keys = F.map_keys(col_ref)
         for ignore_key in COMMON_COLUMNS_TO_IGNORE:
             filtered_keys = F.array_remove(filtered_keys, ignore_key)
 
@@ -468,18 +475,54 @@ def save_diff_results(rows_only_in_source, rows_only_in_target, only_differing_c
         row_count = df.count()
         if row_count > 0:
             non_empty_files.append((folder_name, os.path.basename(filepath), row_count))
-            if len(non_empty_files) == 1:
-                print(f"\nSaving diff results to: {output_path}")
+            if output_path:
+                if len(non_empty_files) == 1:
+                    print(f"\nSaving diff results to: {output_path}")
 
-            write_csv(df, filepath)
-            print_csv_preview(filepath, sample_size)
+                write_csv(df, filepath)
+                print_csv_preview(filepath, sample_size)
 
-    if len(non_empty_files) > 0:
-        print("\n  Saved and displayed previews.\n")
-    else:
-        print("\n  No results to saved. All matched. \n")
+    if output_path:
+        if non_empty_files:
+            print("\n  Saved and displayed previews.\n")
+        else:
+            print("\n  No content differences to save.\n")
 
     return non_empty_files
+
+
+SUMMARY_COLUMNS = (
+    "Dataset", "Avro subfolder", "Record count (test)", "Record count (dev)",
+    "Schema match?", "Content match?", "Notes", "Test Result",
+)
+
+
+def emr_log_location(cluster_log_uri: str) -> str:
+    step_id = os.environ.get("EMR_STEP_ID", "")
+    if not re.fullmatch(r"s-[A-Z0-9]+", step_id):
+        step_id = Path.cwd().name
+    if re.fullmatch(r"s-[A-Z0-9]+", step_id):
+        return f"EMR step log: `{cluster_log_uri.rstrip('/')}/steps/{step_id}/stderr.gz`"
+
+    print("WARNING: Could not identify the EMR step ID; reporting the cluster log location instead.")
+    return f"EMR cluster logs (step ID unavailable): `{cluster_log_uri}`"
+
+
+def write_markdown_summary(filename, rows, append=False):
+    def table_row(cells):
+        escaped = [str(cell).replace("\\", "\\\\").replace("|", r"\|").replace("\r", " ").replace("\n", " ")
+                   for cell in cells]
+        return "| " + " | ".join(escaped) + " |\n"
+
+    path = Path(filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    needs_header = not append or not path.exists() or path.stat().st_size == 0
+    with path.open("a" if append else "w", encoding="utf-8") as report:
+        if needs_header:
+            report.write(table_row(SUMMARY_COLUMNS))
+            report.write(table_row(["---"] * len(SUMMARY_COLUMNS)))
+        report.writelines(table_row(row) for row in rows)
+    print(f"\nMarkdown summary: {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +538,11 @@ def main():
     parser.add_argument("-f", "--parent-folder", default=PARENT_FOLDER, help="Parent folder for comparison")
     parser.add_argument("-k", "--keys",        default=",".join(PRIMARY_KEYS), help="Comma-separated primary key columns")
     #parser.add_argument("--columns",     default=None, help="Comma-separated columns to compare (default: all)")
-    parser.add_argument("-o", "--output",      default="result", help="S3/local path to save diff CSVs (optional)")
+    parser.add_argument("-o", "--output",      default="result", help="Local directory for diff CSVs")
+    parser.add_argument("--summary", help="Local Markdown path (default: summary.md in the output directory)")
+    parser.add_argument("--append-summary", action="store_true", help="Append rows to an existing Markdown summary")
+    parser.add_argument("--log-uri", help="EMR cluster log location; used to build the current step's log path")
+    parser.add_argument("--csv-uri-prefix", help="Published CSV directory to report instead of the local directory")
     parser.add_argument("-r", "--recursive", action="store_true", help="Recursively compare Avro files")
     parser.add_argument("-v", "--preview",      default=10, type=int, help="Number of sample diff rows to preview")
 
@@ -534,12 +581,30 @@ def main():
     if tgt_only:
         print(f"  Only in target       : {tgt_only}")
 
-    if not common:
-        print("\nNo matching subfolders found. Exiting.")
-        spark.stop()
-        return
-
     summary_records = []
+    markdown_rows = []
+    dataset_prefix = f"{args.path.strip('/')}/{args.datasetId}"
+    log_location = emr_log_location(args.log_uri) if args.log_uri else "EMR logs: not provided"
+
+    def avro_subfolder(path):
+        relative = urlparse(path).path.strip("/").removeprefix(dataset_prefix).strip("/")
+        return f"{args.path.strip('/')}/{relative}" if relative else args.path.strip("/")
+
+    for missing_from, folders, paths in (("dev", src_only, src_folders), ("test", tgt_only, tgt_folders)):
+        for folder in folders:
+            path = paths[folder]
+            count = read_avro(spark, path).count()
+            test_count, dev_count = (count, 0) if missing_from == "dev" else (0, count)
+            markdown_rows.append((
+                args.datasetId, avro_subfolder(path), test_count, dev_count, "Not compared", "No",
+                f"Avro files missing in {missing_from}", log_location,
+            ))
+
+    if not (common or src_only or tgt_only):
+        markdown_rows.append((
+            args.datasetId, avro_subfolder(src_parent_path), "-", "-", "Not compared", "Not compared",
+            "No Avro files found in either environment", log_location,
+        ))
 
     for folder_name in common:
         src_path = src_folders[folder_name]
@@ -556,8 +621,8 @@ def main():
         df_source = read_avro(spark, src_path)
         df_target = read_avro(spark, tgt_path)
 
-        compare_schemas(df_source, df_target)
-        compare_row_counts(df_source, df_target)
+        schema_differences = compare_schemas(df_source, df_target)
+        src_count, tgt_count = compare_row_counts(df_source, df_target)
 
         # -------------------------------------------------------------------
         # Dynamic Column Filtering per Folder
@@ -586,29 +651,42 @@ def main():
         pivoted_diffs = pivot_diff_for_csv(rows_with_differences, primary_keys)
 
         # Filter out matching rows (if any survived) and print
-        only_differing_cols = pivoted_diffs.filter(
-            ~(F.col("source").eqNullSafe(F.col("target")))
-        )
+        only_differing_cols = pivoted_diffs
+        if {"column", "source", "target"} <= set(pivoted_diffs.columns):
+            only_differing_cols = pivoted_diffs.filter(~F.col("source").eqNullSafe(F.col("target")))
 
         #print(f"\n--- Differing Columns Only (up to {args.sample}) ---")
         #only_differing_cols.show(args.sample, truncate=False)
 
         #print_diff_report(rows_only_in_source, rows_only_in_target, only_differing_cols, args.sample)
 
+        folder_diff_files = save_diff_results(
+            rows_only_in_source, rows_only_in_target, only_differing_cols,
+            args.output, folder_name, args.preview,
+        )
         if args.output:
-            folder_diff_files = save_diff_results(
-                rows_only_in_source,
-                rows_only_in_target,
-                only_differing_cols,
-                args.output,
-                folder_name,
-                args.preview
-            )
             summary_records.extend(folder_diff_files)
 
-        #if args.output:
-        #    save_diff_results(rows_only_in_source, rows_only_in_target, only_differing_cols, args.output, folder_name, args.sample)
-        #   save_diff_results(rows_only_in_source, rows_only_in_target, rows_with_differences, args.output, primary_keys)
+        notes = []
+        if schema_differences:
+            notes.extend([", ".join(schema_differences), "Content check uses shared, non-ignored columns"])
+        if src_count != tgt_count:
+            notes.append("Record counts differ")
+        csv_prefix = (args.csv_uri_prefix or args.output).rstrip("/")
+        result_locations = [log_location]
+        if args.output:
+            result_locations.extend(f"CSV: `{csv_prefix}/{filename}`" for _, filename, _ in folder_diff_files)
+        markdown_rows.append((
+            args.datasetId, avro_subfolder(src_path), src_count, tgt_count,
+            "No" if schema_differences else "Yes",
+            "No" if folder_diff_files or src_count != tgt_count else "Yes",
+            "; ".join(notes), "<br>".join(result_locations),
+        ))
+
+    summary_path = args.summary or (Path(args.output) / "summary.md" if args.output else None)
+    if summary_path:
+        write_markdown_summary(summary_path, markdown_rows, append=args.append_summary)
+
     # ---------------------------------------------------------------------------
     # Final Execution Summary Report
     # ---------------------------------------------------------------------------
@@ -617,7 +695,7 @@ def main():
     print(f"{'=' * 120}")
 
     if not summary_records:
-        print("  All compared folders match perfectly. No difference CSVs contain data.")
+        print("  No difference CSVs were generated. See the summary for schema and content results.")
     else:
         print("  The following generated CSV files contain differences:\n")
         print(f"  {'SUBFOLDER':<20} | {'FILE NAME':<40} | {'ROW COUNT':<10}")

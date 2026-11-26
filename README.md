@@ -220,6 +220,17 @@ Benefits: balanced cluster utilization, predictable parallelism, fine-grained co
 | Notifications | Slack webhook (success/failure operator) |
 | Fail fast | Partition task raises skip if zero datasets |
 
+### Avro comparison reports
+
+The `Test_avros` DAG uploads one Markdown report per dataset to
+`s3://<target-bucket>/test_avros_result/<timestamp>/<dataset>/summary.md` alongside any generated diff CSVs.
+The source bucket is reported as **test** and the target as **dev**. Each row shows the record counts, schema and
+content results, and the field names involved in schema differences. Full type details are only in the EMR logs.
+The content check uses shared columns after excluding the configured
+ignored fields, so a content match does not imply a schema match. **Test Result** lists the `stderr.gz` log for the
+EMR step that ran the comparison (`<cluster-log-uri>/<cluster-id>/steps/<step-id>/stderr.gz`) and the CSV locations
+for that row, if any. If the step ID is unavailable, the report labels and lists the cluster log location instead.
+
 ## Upgrading
 
 1. Update Airflow version & constraints URL (match minor release) in `dags/requirements.txt`.
@@ -254,8 +265,5 @@ Distributed under the Mozilla Public License 1.1. See [`LICENSE.md`](LICENSE.md)
 ---
 
 For questions or improvements, open an issue or submit a PR—contributions welcome.
-
-
-
 
 

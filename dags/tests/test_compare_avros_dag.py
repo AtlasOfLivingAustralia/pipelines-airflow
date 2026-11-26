@@ -1,4 +1,5 @@
 import copy
+from shlex import quote
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.models.param import Param
@@ -92,42 +93,39 @@ with (DAG(
         return sorted(subfolders_with_avro)
 
     @task
-    def get_test_avro_steps(dr: str, subfolders: list[str], spark_args: str, **kwargs) -> list[dict]:
+    def get_test_avro_steps(dr: str, subfolders: list[str], spark_args: str,
+                            cluster_id: str, log_uri: str, **kwargs) -> list[dict]:
         """Build one EMR step dict per subfolder."""
         s3_source_bucket = kwargs["dag_run"].conf["source_bucket"]
         s3_target_bucket = kwargs["dag_run"].conf["target_bucket"]
-        # Current time
-        current = now().strftime("%Y-%m-%d-%H-%M")
+        current = now().strftime("%Y-%m-%d-%H-%M-%S-%f")
         output_folder = f"/tmp/{current}/{dr}"
-        test_steps = [
-            step_bash_cmd(
-                step_name=f"Compare avro files in {s3_source_bucket} and {s3_target_bucket} for pipelines-data/{dr}/1/{folder}",
+        result_prefix = f"{s3_target_bucket.rstrip('/')}/test_avros_result/{current}/{dr}"
+        cluster_logs = f"{log_uri.rstrip('/')}/{cluster_id}/"
+        summary_args = (
+            f"--summary {quote(f'{output_folder}/summary.md')} --append-summary "
+            f"--log-uri {quote(cluster_logs)}"
+        )
+
+        def compare_step(path, parent, csv_dir):
+            dataset_path = "/".join(part for part in (path, dr, parent) if part)
+            return step_bash_cmd(
+                step_name=f"Compare avro files in {s3_source_bucket} and {s3_target_bucket} for {dataset_path}",
                 cmd=(
                     f"spark-submit {spark_args} {PYSPARK_FILE_PATH} "
-                    f"-s {s3_source_bucket} "
-                    f"-t {s3_target_bucket} "
-                    f"-p pipelines-data "
-                    f"-d {dr} "
-                    f"-f 1/{folder} "
-                    f"-o {output_folder}/pipelines-data "
+                    f"-s {quote(s3_source_bucket)} -t {quote(s3_target_bucket)} "
+                    f"-p {quote(path)} -d {quote(dr)} -f {quote(parent)} "
+                    f"-o {quote(f'{output_folder}/{csv_dir}')} "
+                    f"--csv-uri-prefix {quote(f'{result_prefix}/{csv_dir}')} {summary_args}"
                 ),
             )
-            for folder in subfolders
-        ]
+
+        test_steps = [compare_step("pipelines-data", f"1/{folder}", f"pipelines-data/{folder}")
+                      for folder in subfolders]
         test_steps.extend([
-            step_bash_cmd(
-                step_name=f"Compare avro files in {s3_source_bucket} and {s3_target_bucket} for pipelines-all-datasets/index-record/{dr}",
-                cmd=(
-                    f"spark-submit {spark_args} {PYSPARK_FILE_PATH} "
-                    f"-s {s3_source_bucket} "
-                    f"-t {s3_target_bucket} "
-                    f"-p pipelines-all-datasets/index-record "
-                    f"-d {dr} "
-                    f"-f '' "
-                    f"-o {output_folder}/index-record "
-                ),
-            ),
-            step_s3_cp_file(dr, output_folder, f"{s3_target_bucket}/test_avros_result/{current}/{dr}", "--recursive --content-disposition inline --content-type text/plain")
+            compare_step("pipelines-all-datasets/index-record", "", "index-record"),
+            step_s3_cp_file(dr, output_folder, result_prefix,
+                            "--recursive --content-disposition inline --content-type text/plain"),
         ])
         return test_steps
 
@@ -159,9 +157,9 @@ with (DAG(
         config = copy.deepcopy(base)
         config["ReleaseLabel"] = EMR_RELEASE
         config["BootstrapActions"] = []
+        config["StepConcurrencyLevel"] = 1  # Steps append to a shared Markdown file.
 
-        # Return both cluster config and spark args together
-        return {"cluster_config": config, "spark_args": spark_args}
+        return {"cluster_config": config, "spark_args": spark_args, "log_uri": config["LogUri"]}
 
     @task_group(group_id="per_dataset")
     def per_dataset_pipeline(dr: str, size: str):
@@ -169,10 +167,7 @@ with (DAG(
         cluster_config = get_cluster_config(dr=dr, size=size)
         subfolders = get_subfolders(dr=dr)
 
-        # 2. Build the list of EMR steps from discovered subfolders
-        steps = get_test_avro_steps(dr=dr, subfolders=subfolders, spark_args=cluster_config["spark_args"])
-
-        # 3. Create the EMR cluster
+        # 2. Create the EMR cluster to obtain the run-specific log location
         create_cluster = EmrCreateJobFlowOperator(
             task_id="create_emr_cluster",
             emr_conn_id="emr_default",
@@ -180,7 +175,11 @@ with (DAG(
             aws_conn_id="aws_default",
         )
 
-        # 4. Add all steps at once
+        # 3. Build and submit the comparison and upload steps
+        steps = get_test_avro_steps(
+            dr=dr, subfolders=subfolders, spark_args=cluster_config["spark_args"],
+            cluster_id=create_cluster.output, log_uri=cluster_config["log_uri"],
+        )
         add_steps = EmrAddStepsOperator(
             task_id="add_steps",
             job_flow_id=create_cluster.output,  # output of the create_cluster
@@ -197,10 +196,8 @@ with (DAG(
             aws_conn_id="aws_default",
         )
 
-        # Execute cluster_config and subfolders in parallel and wait for it to complete before proceeding to
-        # create_cluster task
-        [cluster_config, subfolders] >> steps
-        steps >> create_cluster >> add_steps >> termination_sensor
+        subfolders >> create_cluster
+        steps >> add_steps >> termination_sensor
 
     # Expand one task group per dataset
     per_dataset_pipeline.expand_kwargs(get_dataset_emr_sizing())
